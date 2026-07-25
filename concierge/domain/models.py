@@ -97,7 +97,7 @@ class KitItem(BaseModel):
     slot: str
     product_title: str
     product_url: Url
-    image_url: Url
+    image_url: Url | None = None  # a real in-stock product without a photo is still buyable
     variant_id: str
     size_label: str
     price_minor: int
