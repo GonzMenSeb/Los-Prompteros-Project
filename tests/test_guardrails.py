@@ -438,6 +438,49 @@ class TestInventedPrices:
         assert "a great price." in out
         assert guardrail_events(sink)[0].payload["kinds"] == ["price"]
 
+    def test_a_merged_variant_line_total_is_legitimate(self):
+        """MCP merges duplicate variant lines: two people in the same size come back
+        as ONE line at quantity 2, so the pair price is real even though the kit
+        holds two separate quantity-1 items."""
+        pair = [item(price_minor=10000), item(price_minor=10000)]
+        assert find_unbacked_claims("$200.00 for the pair.", pair) == []
+        assert [c.kind for c in find_unbacked_claims("$250.00 for the pair.", pair)] == ["price"]
+
+
+class TestInventedDiscounts:
+    """Unbacked BY CONSTRUCTION. The feed carries `compare_at_price` ("149.00") and
+    MCP carries `list_price` (14900) for the NH500, and BOTH are deliberately
+    unmapped — `CatalogVariant` is variant_gid/size_label/price_minor/available.
+    No pre-discount number can reach the model, so every discount claim is invented
+    even when the underlying fact is true: the boot really is $100 down from $149.
+    """
+
+    kit = [item(product_title="Quechua NH500 Boots", price_minor=10000)]
+
+    @pytest.mark.parametrize(
+        "prose",
+        [
+            "Down from $149.00, now $100.00.",
+            "Save $49 on these.",
+            "30% off today.",
+            "These are on sale.",
+            "The list price was $149.",
+            "Half price this week.",
+            "Marked down from $149.",
+        ],
+    )
+    def test_discount_claims_are_flagged(self, prose):
+        assert "discount" in {c.kind for c in find_unbacked_claims(prose, self.kit)}
+
+    def test_the_real_price_is_still_legitimate(self):
+        assert find_unbacked_claims("It is $100.00, the best boot in your budget.", self.kit) == []
+
+    def test_no_live_product_title_carries_discount_language(self):
+        """If one ever does, the word is backed by a retrieved field and stops
+        flagging — which is correct, and this test is how we would notice."""
+        titles = [p.title for h in ("hiking-boots", "sleeping-bags", "base-layers") for p in catalog(h)]
+        assert not [t for t in titles if any(w in t.lower() for w in ("on sale", "clearance", "% off"))]
+
 
 class TestCheckQueryShape:
     @pytest.mark.parametrize(

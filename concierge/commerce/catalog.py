@@ -114,6 +114,7 @@ def suggest_handles(bad: str, taxonomy: list[dict[str, str]], k: int = 5) -> lis
 
 def map_product(raw: dict[str, Any]) -> CatalogProduct:
     images = raw.get("images") or []
+    gid = f"gid://shopify/Product/{raw['id']}"
     variants = [
         CatalogVariant(
             variant_gid=f"gid://shopify/ProductVariant/{v['id']}",
@@ -124,7 +125,7 @@ def map_product(raw: dict[str, Any]) -> CatalogProduct:
         for v in raw.get("variants") or []
     ]
     return CatalogProduct(
-        product_gid=f"gid://shopify/Product/{raw['id']}",
+        product_gid=gid,
         handle=raw["handle"],
         title=raw["title"],
         product_url=f"{BASE}/products/{raw['handle']}",

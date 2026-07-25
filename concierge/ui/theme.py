@@ -43,6 +43,7 @@ ON_BRAND = WHITE
 
 # Their brand faces are proprietary; Inter is the one they also load.
 FONT = "Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif"
+MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 
 RADIUS = "8px"
 RADIUS_SM = "4px"

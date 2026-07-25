@@ -205,18 +205,24 @@ def test_get_cart_takes_a_flat_id_not_a_nested_cart(mcp):
 
 
 @pytest.mark.live
-def test_update_cart_replaces_line_items_rather_than_appending(mcp):
-    """The silent cart-doubling bug. update_cart wants BOTH nestings —
-    {"id": ..., "cart": {"line_items": [...]}} — and REPLACES the lines."""
+def test_update_cart_replaces_line_items_and_is_not_a_no_op(mcp):
+    """update_cart wants BOTH nestings — {"id": ..., "cart": {"line_items": [...]}} —
+    and REPLACES the lines.
+
+    The 2 -> 1 quantity change is load-bearing, do not "simplify" it to 1 -> 1.
+    1 -> 1 catches an append (it would total unit x2) but CANNOT catch a silent
+    no-op: the cart would sit at unit x1 and the assertion would pass green.
+    Starting at 2 forces the total to change, so append and no-op both fail.
+    """
     unit = mcp["cart"]["line_items"][0]["item"]["price"]
-    assert _total(mcp["cart"]) == unit * 2, "setup: cart was created with quantity 2"
+    assert _total(mcp["cart"]) == unit * 2, "setup: cart must be created with quantity 2"
 
     updated = mcp["update_cart"]
     assert _total(updated) == unit, (
-        f"update_cart appended instead of replacing. {FACTS} says it REPLACES line_items:\n"
-        f"  a cart of 2 updated to a single quantity-1 line must total {unit}, not "
-        f"{_total(updated)}.\n"
-        "  If this became append semantics, every edit silently doubles the customer's cart."
+        f"update_cart is no longer replace-in-place. {FACTS} says it REPLACES line_items:\n"
+        f"  a cart of 2 updated to a single quantity-1 line must total {unit}, not {_total(updated)}.\n"
+        f"  {unit * 3} means it appended — every edit silently doubles the customer's cart.\n"
+        f"  {unit * 2} means the update did nothing at all."
     )
     assert sum(li["quantity"] for li in updated["line_items"]) == 1
 

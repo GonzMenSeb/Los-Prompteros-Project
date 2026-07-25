@@ -8,7 +8,43 @@ from __future__ import annotations
 import reflex as rx
 
 from concierge.state import FIXTURE_MODE, State
-from concierge.ui.theme import ACCENT, BORDER, DANGER, MUTED, PANEL_2, TEXT
+from concierge.ui.theme import (  # noqa: F401
+    ACCENT,
+    ACCENT_DIM,
+    BG,
+    BORDER,
+    BRAND,
+    BRAND_DARK,
+    BRAND_DEEP,
+    DANGER,
+    DANGER_BG,
+    FONT,
+    GREY_1,
+    GREY_2,
+    GREY_3,
+    GREY_4,
+    GUARDRAIL,
+    INK,
+    LEVEL_BG,
+    LEVEL_COLOR,
+    MONO,
+    MUTED,
+    OFFWHITE,
+    ON_BRAND,
+    PANEL,
+    PANEL_2,
+    RADIUS,
+    RADIUS_SM,
+    SUCCESS,
+    SUCCESS_BG,
+    TEXT,
+    TINT_1,
+    TINT_2,
+    TINT_3,
+    WARN,
+    WARN_BG,
+    WHITE,
+)
 
 
 def confirm_bar() -> rx.Component:
@@ -38,13 +74,17 @@ def confirm_bar() -> rx.Component:
                 size="4",
                 width="100%",
                 cursor="pointer",
+                background=BRAND,
+                color=ON_BRAND,
+                border_radius=RADIUS_SM,
+                _hover={"background": BRAND_DARK},
             ),
             spacing="3",
             width="100%",
             padding="1.15rem",
-            background="rgba(61,220,151,0.08)",
-            border=f"1px solid {ACCENT}",
-            border_radius="14px",
+            background=TINT_1,
+            border=f"1px solid {TINT_3}",
+            border_radius=RADIUS,
         ),
     )
 
@@ -54,12 +94,12 @@ def cart_block() -> rx.Component:
         State.has_cart,
         rx.vstack(
             rx.hstack(
-                rx.icon("circle-check-big", size=22, color=ACCENT),
+                rx.icon("circle-check-big", size=22, color=SUCCESS),
                 rx.text(
                     "Cart created at Decathlon",
                     size="4",
                     weight="bold",
-                    color=ACCENT,
+                    color=SUCCESS,
                 ),
                 spacing="2",
                 align="center",
@@ -92,18 +132,18 @@ def cart_block() -> rx.Component:
                 is_external=True,
                 width="100%",
                 padding="1.1rem",
-                background=ACCENT,
-                color="#04150d",
-                border_radius="12px",
+                background=BRAND,
+                color=ON_BRAND,
+                border_radius=RADIUS,
                 text_decoration="none",
                 text_align="center",
-                _hover={"opacity": "0.9"},
+                _hover={"background": BRAND_DARK},
             ),
             rx.text(
                 State.cart_url,
                 size="1",
                 color=MUTED,
-                font_family="monospace",
+                font_family=MONO,
                 word_break="break-all",
                 line_height="1.5",
             ),
@@ -116,7 +156,7 @@ def cart_block() -> rx.Component:
             padding="1.3rem",
             background=PANEL_2,
             border=f"2px solid {ACCENT}",
-            border_radius="14px",
+            border_radius=RADIUS,
         ),
     )
 
@@ -131,9 +171,9 @@ def error_block() -> rx.Component:
             align="center",
             width="100%",
             padding="0.9rem 1rem",
-            background="rgba(255,107,94,0.12)",
+            background=DANGER_BG,
             border=f"1px solid {DANGER}",
-            border_radius="12px",
+            border_radius=RADIUS,
         ),
     )
 

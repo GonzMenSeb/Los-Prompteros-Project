@@ -373,6 +373,14 @@ _CLAIM_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("material", re.compile(r"(?i)\b\d+\s*(?:fill\s*power|fp)\b")),
     ("weight", re.compile(r"(?i)\b\d+(?:\.\d+)?\s*(?:kg|kgs|g|grams?|lbs?|pounds?|oz|ounces?)\b")),
     ("price", re.compile(r"\$\s?\d[\d,]*(?:\.\d{1,2})?")),
+    # Unbacked BY CONSTRUCTION, not merely unbacked by this kit: the feed's
+    # `compare_at_price` and MCP's `list_price` are deliberately unmapped, so no
+    # pre-discount number can reach the model at all. The NH500 really is $100 from
+    # $149 — we still must not say so, because nothing in the pipeline sourced it.
+    ("discount", re.compile(r"(?i)\b\d+\s*%\s*(?:off|discount|reduction|savings?)\b")),
+    ("discount", re.compile(r"(?i)\b(?:was|were|down\s+from|reduced\s+from|marked\s+down\s+from|rrp|msrp|list\s+price)\s*:?\s*\$?\s?\d[\d,]*(?:\.\d{1,2})?")),
+    ("discount", re.compile(r"(?i)\bsave\s*(?:up\s+to\s*)?\$?\s?\d[\d,]*(?:\.\d{1,2})?")),
+    ("discount", re.compile(r"(?i)\b(?:on\s+sale|clearance|discounted|half\s+price|marked\s+down)\b")),
 ]
 
 
@@ -388,14 +396,23 @@ def _allowed_prices(items: Sequence[Any], extra: Iterable[int]) -> set[int]:
     the kit total, or a figure the caller explicitly whitelists (a budget)."""
     unit: list[int] = []
     line: list[int] = []
+    merged: dict[str, list[int]] = {}
     for i in items:
         price = i.get("price_minor") if isinstance(i, Mapping) else getattr(i, "price_minor", None)
         if not isinstance(price, int):
             continue
         qty = i.get("quantity", 1) if isinstance(i, Mapping) else getattr(i, "quantity", 1)
+        qty = qty if isinstance(qty, int) else 1
+        vid = i.get("variant_id", "") if isinstance(i, Mapping) else getattr(i, "variant_id", "")
         unit.append(price)
-        line.append(price * (qty if isinstance(qty, int) else 1))
-    return {*unit, *line, sum(line), *extra}
+        line.append(price * qty)
+        slot = merged.setdefault(str(vid), [price, 0])
+        slot[1] += qty
+
+    # MCP merges duplicate variant lines: two people in the same size come back as
+    # one line at qty 2, so "$200 for the pair" is legitimate even when the kit
+    # holds two separate quantity-1 items.
+    return {*unit, *line, sum(line), *(p * q for p, q in merged.values()), *extra}
 
 
 def _normalise(s: str) -> str:

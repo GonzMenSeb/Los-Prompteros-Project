@@ -32,27 +32,53 @@ _backend: Any = stubs
 _cache: ContextVar[dict[str, CatalogProduct] | None] = ContextVar("catalog_cache", default=None)
 
 
+# Each capability, in preference order. Resolved by name at swap time so a
+# missing one fails loudly here rather than as an AttributeError mid-demo.
+_CAPABILITIES = {
+    "get_taxonomy": ("get_taxonomy",),
+    "get_collection": ("get_collection",),
+    "search_catalog": ("search_catalog", "search_fallback"),
+    "resolve_variant": ("try_resolve_variant", "resolve_variant"),
+}
+
+
 class _Adapter:
     """Normalises a catalog backend to the four calls the loop expects.
 
     commerce/catalog.py signals by exception (UnknownHandle, NoStockError) and
     names its keyword search `search_fallback`. The loop is written against
     empty-list / None returns, so the translation lives here rather than as
-    try/except scattered through loop.py.
+    try/except scattered through loop.py. UcpRateLimited is deliberately NOT
+    swallowed — a rate limit must not be reported as an unservable slot.
     """
 
     def __init__(self, impl: Any) -> None:
         self._impl = impl
+        self._fn: dict[str, Any] = {}
+        missing = []
+        for cap, names in _CAPABILITIES.items():
+            fn = next((getattr(impl, n) for n in names if callable(getattr(impl, n, None))), None)
+            if fn is None:
+                missing.append(f"{cap} (looked for: {', '.join(names)})")
+            else:
+                self._fn[cap] = fn
+        if missing:
+            raise AttributeError(
+                f"catalog backend {getattr(impl, '__name__', impl)!r} is missing: " + "; ".join(missing)
+            )
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._impl, name)
 
+    def resolves_none_itself(self) -> bool:
+        return self._fn["resolve_variant"].__name__ == "try_resolve_variant"
+
     async def get_taxonomy(self) -> list[dict[str, str]]:
-        return await self._impl.get_taxonomy()
+        return await self._fn["get_taxonomy"]()
 
     async def get_collection(self, handle: str, limit: int = 12) -> list[CatalogProduct]:
         try:
-            return await self._impl.get_collection(handle, limit)
+            return await self._fn["get_collection"](handle, limit)
         except Exception as exc:
             if type(exc).__name__ != "UnknownHandle":
                 raise
@@ -61,12 +87,11 @@ class _Adapter:
             return []
 
     async def search_catalog(self, query: str, limit: int = 10) -> list[CatalogProduct]:
-        fn = getattr(self._impl, "search_catalog", None) or getattr(self._impl, "search_fallback")
-        return await fn(query, limit)
+        return await self._fn["search_catalog"](query, limit)
 
     async def resolve_variant(self, product: CatalogProduct, requested_size: str | None = None) -> Any:
         try:
-            return await self._impl.resolve_variant(product, requested_size)
+            return await self._fn["resolve_variant"](product, requested_size)
         except Exception as exc:
             if type(exc).__name__ != "NoStockError":
                 raise
@@ -75,8 +100,16 @@ class _Adapter:
 
 def set_backend(module_or_obj: Any) -> None:
     global _backend
-    _backend = _Adapter(module_or_obj)
-    emit("tools.backend", {"backend": getattr(module_or_obj, "__name__", type(module_or_obj).__name__)})
+    adapter = _Adapter(module_or_obj)
+    _backend = adapter
+    emit(
+        "tools.backend",
+        {
+            "backend": getattr(module_or_obj, "__name__", type(module_or_obj).__name__),
+            "resolve": adapter._fn["resolve_variant"].__name__,
+            "search": adapter._fn["search_catalog"].__name__,
+        },
+    )
 
 
 def backend() -> Any:

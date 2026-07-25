@@ -10,15 +10,42 @@ from __future__ import annotations
 import reflex as rx
 
 from concierge.state import KitCard, State
-from concierge.ui.theme import (
+from concierge.ui.theme import (  # noqa: F401
     ACCENT,
+    ACCENT_DIM,
+    BG,
     BORDER,
+    BRAND,
+    BRAND_DARK,
+    BRAND_DEEP,
     DANGER,
+    DANGER_BG,
+    FONT,
+    GREY_1,
+    GREY_2,
+    GREY_3,
+    GREY_4,
+    GUARDRAIL,
+    INK,
+    LEVEL_BG,
+    LEVEL_COLOR,
+    MONO,
     MUTED,
+    OFFWHITE,
+    ON_BRAND,
     PANEL,
     PANEL_2,
+    RADIUS,
+    RADIUS_SM,
+    SUCCESS,
+    SUCCESS_BG,
     TEXT,
+    TINT_1,
+    TINT_2,
+    TINT_3,
     WARN,
+    WARN_BG,
+    WHITE,
 )
 
 
@@ -26,13 +53,13 @@ def substituted_badge(item: KitCard) -> rx.Component:
     return rx.cond(
         item.size_substituted,
         rx.hstack(
-            rx.icon("triangle-alert", size=14, color="#1a1200"),
-            rx.text("SIZE SUBSTITUTED", size="1", weight="bold", color="#1a1200"),
+            rx.icon("triangle-alert", size=14, color=INK),
+            rx.text("SIZE SUBSTITUTED", size="1", weight="bold", color=INK),
             spacing="1",
             align="center",
             background=WARN,
             padding="0.3rem 0.6rem",
-            border_radius="6px",
+            border_radius=RADIUS_SM,
         ),
     )
 
@@ -86,12 +113,14 @@ def product_card(item: KitCard) -> rx.Component:
                 ),
             ),
             width="100%",
-            height="200px",
-            # White only behind a real cutout photo; an empty white box reads as a
-            # broken image rather than a product that has none.
-            background=rx.cond(item.image_url != "", "#ffffff", PANEL_2),
-            border=rx.cond(item.image_url != "", "none", f"1px dashed {BORDER}"),
-            border_radius="10px",
+            height="210px",
+            # The card is already white, so a photo needs no fill. The no-photo
+            # branch does, or an empty white box reads as a broken image.
+            background=rx.cond(item.image_url != "", WHITE, PANEL_2),
+            border=rx.cond(
+                item.image_url != "", f"1px solid {BORDER}", f"1px dashed {GREY_3}"
+            ),
+            border_radius=RADIUS_SM,
             overflow="hidden",
             padding="0.5rem",
         ),
@@ -117,9 +146,10 @@ def product_card(item: KitCard) -> rx.Component:
         ),
         substituted_badge(item),
         rx.vstack(
+            # This is a shop: the price is the headline, not a spec row.
+            rx.text(item.price_display, size="7", weight="bold", color=INK),
             spec_row("SIZE", item.size_label),
             spec_row("QTY", item.quantity_label),
-            spec_row("PRICE", item.price_display),
             spacing="1",
             width="100%",
             padding_top="0.6rem",
@@ -154,9 +184,10 @@ def product_card(item: KitCard) -> rx.Component:
         padding="0.9rem",
         background=PANEL,
         border=f"1px solid {BORDER}",
-        border_radius="14px",
+        border_radius=RADIUS,
         height="100%",
         width="100%",
+        _hover={"border_color": BRAND},
     )
 
 
@@ -165,12 +196,14 @@ def unservable_notice() -> rx.Component:
         State.has_unservable,
         rx.vstack(
             rx.hstack(
-                rx.icon("circle-slash", size=18, color=WARN),
+                # The yellow is the surface, never the type: #FFCD4E text on a
+                # pale-yellow wash is illegible on a projector.
+                rx.icon("circle-slash", size=18, color=INK),
                 rx.text(
                     "SLOTS I COULD NOT FILL",
                     size="2",
                     weight="bold",
-                    color=WARN,
+                    color=INK,
                     letter_spacing="0.08em",
                 ),
                 spacing="2",
@@ -184,9 +217,9 @@ def unservable_notice() -> rx.Component:
             align="start",
             width="100%",
             padding="1rem 1.15rem",
-            background="rgba(255,176,32,0.09)",
+            background=WARN_BG,
             border=f"1px solid {WARN}",
-            border_radius="12px",
+            border_radius=RADIUS,
         ),
     )
 
@@ -218,12 +251,12 @@ def budget_line() -> rx.Component:
                 align="center",
                 width="100%",
                 padding="0.75rem 1rem",
-                background="rgba(255,107,94,0.12)",
+                background=DANGER_BG,
                 border=f"1px solid {DANGER}",
-                border_radius="10px",
+                border_radius=RADIUS,
             ),
             rx.hstack(
-                rx.icon("check", size=18, color=ACCENT),
+                rx.icon("check", size=18, color=SUCCESS),
                 rx.text(
                     f"{State.budget_delta_display} under your {State.budget_display} budget.",
                     size="2",
@@ -233,9 +266,9 @@ def budget_line() -> rx.Component:
                 align="center",
                 width="100%",
                 padding="0.75rem 1rem",
-                background="rgba(61,220,151,0.10)",
-                border=f"1px solid {ACCENT}",
-                border_radius="10px",
+                background=SUCCESS_BG,
+                border=f"1px solid {SUCCESS}",
+                border_radius=RADIUS,
             ),
         ),
     )
@@ -244,9 +277,9 @@ def budget_line() -> rx.Component:
 def kit_summary() -> rx.Component:
     return rx.vstack(
         rx.flex(
-            stat("KIT TOTAL", State.total_display, ACCENT),
+            stat("KIT TOTAL", State.total_display, INK),
             stat("ITEMS", State.item_count),
-            stat("SIZE SUBSTITUTIONS", State.substitution_count, WARN),
+            stat("SIZE SUBSTITUTIONS", State.substitution_count, INK),
             rx.cond(State.has_budget, stat("BUDGET", State.budget_display, MUTED)),
             gap="2.5rem",
             wrap="wrap",
@@ -256,9 +289,9 @@ def kit_summary() -> rx.Component:
         spacing="3",
         width="100%",
         padding="1.15rem",
-        background=PANEL_2,
+        background=WHITE,
         border=f"1px solid {BORDER}",
-        border_radius="14px",
+        border_radius=RADIUS,
     )
 
 

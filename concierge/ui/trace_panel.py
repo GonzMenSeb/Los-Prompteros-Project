@@ -7,33 +7,71 @@ from __future__ import annotations
 import reflex as rx
 
 from concierge.state import State, TraceRow
-from concierge.ui.theme import (
+from concierge.ui.theme import (  # noqa: F401
     ACCENT,
+    ACCENT_DIM,
     BG,
     BORDER,
+    BRAND,
+    BRAND_DARK,
+    BRAND_DEEP,
     DANGER,
+    DANGER_BG,
+    FONT,
+    GREY_1,
+    GREY_2,
+    GREY_3,
+    GREY_4,
     GUARDRAIL,
+    INK,
+    LEVEL_BG,
+    LEVEL_COLOR,
+    MONO,
     MUTED,
+    OFFWHITE,
+    ON_BRAND,
     PANEL,
     PANEL_2,
+    RADIUS,
+    RADIUS_SM,
+    SUCCESS,
+    SUCCESS_BG,
     TEXT,
+    TINT_1,
+    TINT_2,
+    TINT_3,
+    WARN,
+    WARN_BG,
+    WHITE,
 )
 
 
+# Quiet ink -> brand blue -> danger red. GUARDRAIL and ACCENT both alias BRAND,
+# so colouring info rows with ACCENT would make a guardrail verdict look identical
+# to a routine step — and the guardrail rows are the point of this panel.
 def _level_color(row: TraceRow):
     return rx.match(
         row.level,
-        ("guardrail", GUARDRAIL),
-        ("error", DANGER),
-        ACCENT,
+        ("guardrail", LEVEL_COLOR["guardrail"]),
+        ("error", LEVEL_COLOR["error"]),
+        INK,
+    )
+
+
+def _level_border(row: TraceRow):
+    return rx.match(
+        row.level,
+        ("guardrail", LEVEL_COLOR["guardrail"]),
+        ("error", LEVEL_COLOR["error"]),
+        BORDER,
     )
 
 
 def _level_bg(row: TraceRow):
     return rx.match(
         row.level,
-        ("guardrail", "rgba(201,162,255,0.10)"),
-        ("error", "rgba(255,107,94,0.13)"),
+        ("guardrail", LEVEL_BG["guardrail"]),
+        ("error", LEVEL_BG["error"]),
         "transparent",
     )
 
@@ -46,7 +84,7 @@ def trace_row(row: TraceRow) -> rx.Component:
                 row.seq,
                 size="1",
                 color=MUTED,
-                font_family="monospace",
+                font_family=MONO,
                 min_width="2.2rem",
             ),
             rx.text(
@@ -54,16 +92,17 @@ def trace_row(row: TraceRow) -> rx.Component:
                 size="2",
                 weight="bold",
                 color=color,
-                font_family="monospace",
+                font_family=MONO,
             ),
             rx.spacer(),
             rx.cond(
                 row.level != "info",
                 rx.badge(
                     row.level.upper(),
-                    color_scheme=rx.match(row.level, ("error", "red"), "purple"),
                     variant="solid",
                     size="1",
+                    background=_level_color(row),
+                    color=ON_BRAND,
                 ),
             ),
             width="100%",
@@ -76,7 +115,7 @@ def trace_row(row: TraceRow) -> rx.Component:
                 row.summary,
                 size="1",
                 color=MUTED,
-                font_family="monospace",
+                font_family=MONO,
                 white_space="pre-wrap",
                 word_break="break-word",
                 line_height="1.5",
@@ -88,8 +127,8 @@ def trace_row(row: TraceRow) -> rx.Component:
         width="100%",
         padding="0.55rem 0.7rem",
         background=_level_bg(row),
-        border_left=f"2px solid {color}",
-        border_radius="0 6px 6px 0",
+        border_left=f"3px solid {_level_border(row)}",
+        border_radius=f"0 {RADIUS_SM} {RADIUS_SM} 0",
     )
 
 
@@ -117,7 +156,13 @@ def trace_header() -> rx.Component:
     return rx.hstack(
         rx.icon("activity", size=17, color=ACCENT),
         rx.text("AGENT TRACE", size="2", weight="bold", color=TEXT, letter_spacing="0.1em"),
-        rx.badge(State.trace.length(), color_scheme="jade", variant="soft", size="1"),
+        rx.badge(
+            State.trace.length(),
+            variant="soft",
+            size="1",
+            background=TINT_2,
+            color=BRAND,
+        ),
         rx.spacer(),
         rx.cond(State.is_thinking, rx.spinner(size="1")),
         rx.button(
@@ -163,7 +208,7 @@ def trace_panel() -> rx.Component:
             top="0",
             background=PANEL,
             border=f"1px solid {BORDER}",
-            border_radius=["14px", "14px", "14px", "0"],
+            border_radius=[RADIUS, RADIUS, RADIUS, "0"],
             overflow="hidden",
             flex_shrink="0",
         ),

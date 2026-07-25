@@ -183,10 +183,12 @@ async def resolve_variant(
                     requested_size=requested_size,
                 )
 
-    # Only a real swap counts as a substitution. A product with one variant, or
-    # whose variants differ by colour alone, offered no size to miss.
+    # Discriminator is "was a size choice OFFERED", not "how many are in stock".
+    # Keying on stock silently hides a real swap on a product whose 6 sizes have
+    # exactly one available (Dev A found 7 such products live).
     v = live[0]
-    swappable = len(live) > 1 and any(_size_tokens(x.size_label) for x in live)
+    offered = {t for x in product.variants for t in _size_tokens(x.size_label)}
+    swappable = bool(offered)
     return ResolvedVariant(
         variant_gid=v.variant_gid,
         size_label=v.size_label,

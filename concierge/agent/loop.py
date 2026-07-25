@@ -26,8 +26,9 @@ from typing import Any
 from google.genai import types
 from pydantic import BaseModel, Field, ValidationError
 
-from concierge.agent import prompts, stubs, tools
+from concierge.agent import prompts, tools
 from concierge.agent.classify import MODEL, classify, generate
+from concierge.domain.guardrails import check_budget, check_substitution, scrub_prose
 from concierge.domain.models import (
     ActivityProfile,
     CatalogProduct,
@@ -432,6 +433,20 @@ def _budget_minor(session: ConversationSession) -> int | None:
     return minor
 
 
+def _merge_variants(items: list[KitItem]) -> list[KitItem]:
+    """create_cart merges identical variants into ONE line, so two people needing
+    the same variant would leave len(kit.items) disagreeing with line_count.
+    Aggregate here instead (verified live by Dev A)."""
+    merged: dict[str, KitItem] = {}
+    for item in items:
+        seen = merged.get(item.variant_id)
+        if seen is None:
+            merged[item.variant_id] = item
+        else:
+            seen.quantity += item.quantity
+    return list(merged.values())
+
+
 def _candidate(p: CatalogProduct) -> dict[str, Any]:
     return {
         "product_handle": p.handle,
@@ -480,11 +495,6 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
             unservable.append(pick.slot)
             continue
 
-        if not product.image_url:
-            emit("guardrail.no_image", {"handle": product.handle}, level="guardrail")
-            unservable.append(pick.slot)
-            continue
-
         # Quantity is arithmetic, not a model opinion. One request per person on a
         # per-person slot, so a party in different sizes gets different variants
         # instead of two copies of one person's size.
@@ -529,6 +539,7 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
                 emit("guardrail.item_rejected", {"handle": product.handle, "error": str(exc)[:200]}, level="error")
                 unservable.append(pick.slot)
 
+    items = _merge_variants(items)
     filled = {i.slot for i in items}
     for slot in session.slots:
         if slot.name not in filled:
@@ -553,24 +564,26 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
 
 def _disclosures(kit: Kit) -> str:
     """Emitted from data, not from the model, so they cannot be forgotten."""
-    lines: list[str] = []
-    for item in kit.items:
-        if item.size_substituted:
-            lines.append(f"Size note: {item.product_title} is not in the size you gave — I picked {item.size_label}.")
+    lines = list(check_substitution(kit.items))
     if kit.unservable_slots:
         lines.append("Not stocked right now: " + ", ".join(kit.unservable_slots) + ".")
-    if kit.budget_minor is not None:
-        gap = kit.total_minor - kit.budget_minor
-        lines.append(
-            f"Total {minor_to_display(kit.total_minor)} against your {minor_to_display(kit.budget_minor)} budget — "
-            + (f"over by {minor_to_display(gap)}." if gap > 0 else f"{minor_to_display(-gap)} under.")
-        )
-    else:
-        lines.append(f"Total {minor_to_display(kit.total_minor)}.")
+    # An empty kit with a budget is the nothing-fits case, not a cheap one — the
+    # naive gap arithmetic reports "$40.00 under" on a kit containing nothing.
+    lines.append(check_budget(kit).message)
     return "\n".join(lines)
 
 
-async def _present(session: ConversationSession, kit: Kit) -> str:
+def _disclosure_figures(kit: Kit) -> list[int]:
+    """The money figures _disclosures states. Computed here, so legitimate, but
+    scrub_prose cannot know that — whitelist them or it excises the budget line."""
+    v = check_budget(kit)
+    allowed = [v.total_minor, v.budget_minor, v.over_by_minor]
+    if v.budget_minor is not None:
+        allowed.append(v.budget_minor - v.total_minor)
+    return [m for m in allowed if m]
+
+
+async def _present(session: ConversationSession, kit: Kit, allowed_minor: list[int]) -> str:
     r = await _model(
         session,
         model=MODEL,
@@ -584,7 +597,9 @@ async def _present(session: ConversationSession, kit: Kit) -> str:
         ),
         config=_cfg(),
     )
-    return (r.text or "").strip()
+    # The one guardrail with no structural equivalent: retrieval stops invented
+    # PRODUCTS, nothing stops invented PROPERTIES of real ones.
+    return scrub_prose((r.text or "").strip(), kit.items, allowed_minor=allowed_minor)
 
 
 def _render_questions(qs: list[Question]) -> str:
@@ -701,7 +716,9 @@ async def _continue(session: ConversationSession, user_message: str, result: Tur
     result.profile, result.slots = session.profile, session.slots
     result.citations = session.citations
     result.kit, result.unservable_slots = kit, unservable
-    result.text = (await _present(session, kit) + "\n\n" + _disclosures(kit)).strip()
+    result.text = (
+        await _present(session, kit, _disclosure_figures(kit)) + "\n\n" + _disclosures(kit)
+    ).strip()
     result.offer_cart = bool(kit.items)
     result.stage = "kit"
     return result
@@ -709,9 +726,6 @@ async def _continue(session: ConversationSession, user_message: str, result: Tur
 
 def set_backend(module_or_obj: Any) -> None:
     tools.set_backend(module_or_obj)
-
-
-tools.set_backend(stubs)
 
 
 async def _demo() -> None:
