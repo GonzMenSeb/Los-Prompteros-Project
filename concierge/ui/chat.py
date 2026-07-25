@@ -1,0 +1,164 @@
+from __future__ import annotations
+
+import reflex as rx
+
+from concierge.state import ChatMessage, State
+from concierge.ui.theme import ACCENT, BORDER, MUTED, PANEL, PANEL_2, TEXT
+
+
+def citation_link(c) -> rx.Component:
+    return rx.link(
+        rx.hstack(
+            rx.icon("link", size=13, color=ACCENT),
+            rx.text(c.title, size="1", color=ACCENT, no_of_lines=1),
+            spacing="1",
+            align="center",
+        ),
+        href=c.url,
+        is_external=True,
+        text_decoration="none",
+        padding="0.3rem 0.6rem",
+        border=f"1px solid {BORDER}",
+        border_radius="999px",
+        background=PANEL_2,
+        _hover={"border_color": ACCENT},
+    )
+
+
+def citations(m) -> rx.Component:
+    return rx.cond(
+        m.citations.length() > 0,
+        rx.vstack(
+            rx.text(
+                "SOURCES — GROUNDED WEB SEARCH",
+                size="1",
+                weight="bold",
+                color=MUTED,
+                letter_spacing="0.08em",
+            ),
+            rx.flex(
+                rx.foreach(m.citations, citation_link),
+                wrap="wrap",
+                gap="0.4rem",
+            ),
+            spacing="2",
+            align="start",
+            width="100%",
+            margin_top="0.9rem",
+            padding_top="0.9rem",
+            border_top=f"1px solid {BORDER}",
+        ),
+    )
+
+
+def bubble(m: ChatMessage) -> rx.Component:
+    is_user = m.role == "user"
+    return rx.box(
+        rx.vstack(
+            rx.text(
+                rx.cond(is_user, "YOU", "CONCIERGE"),
+                size="1",
+                weight="bold",
+                letter_spacing="0.1em",
+                color=rx.cond(is_user, MUTED, ACCENT),
+            ),
+            rx.text(
+                m.content,
+                size="3",
+                color=TEXT,
+                white_space="pre-wrap",
+                line_height="1.65",
+            ),
+            citations(m),
+            spacing="2",
+            align="start",
+            width="100%",
+        ),
+        width="100%",
+        padding="1rem 1.15rem",
+        border_radius="14px",
+        background=rx.cond(is_user, PANEL_2, PANEL),
+        border=f"1px solid {BORDER}",
+        border_left=rx.cond(is_user, f"1px solid {BORDER}", f"3px solid {ACCENT}"),
+    )
+
+
+def thinking() -> rx.Component:
+    return rx.cond(
+        State.is_thinking,
+        rx.hstack(
+            rx.spinner(size="2"),
+            rx.text(State.status, size="2", color=MUTED),
+            spacing="3",
+            align="center",
+            padding="0.9rem 1.15rem",
+            border_radius="14px",
+            background=PANEL,
+            border=f"1px solid {BORDER}",
+            width="100%",
+        ),
+    )
+
+
+def composer() -> rx.Component:
+    return rx.form(
+        rx.hstack(
+            rx.input(
+                name="message",
+                placeholder="Hiking to Páramo de Santurbán with my girlfriend, camping two nights…",
+                size="3",
+                width="100%",
+                disabled=State.is_thinking,
+                background=PANEL_2,
+                color=TEXT,
+            ),
+            rx.button(
+                rx.icon("send-horizontal", size=18),
+                type="submit",
+                size="3",
+                disabled=State.is_thinking,
+                cursor="pointer",
+            ),
+            spacing="2",
+            width="100%",
+        ),
+        on_submit=State.send_message,
+        reset_on_submit=True,
+        width="100%",
+    )
+
+
+def empty_state() -> rx.Component:
+    return rx.cond(
+        State.messages.length() == 0,
+        rx.vstack(
+            rx.icon("mountain-snow", size=44, color=ACCENT),
+            rx.heading("Describe the expedition.", size="6", color=TEXT),
+            rx.text(
+                "Where you are going, who is going, and how long for. I research the "
+                "conditions, work out what the trip demands, and fill each slot with a "
+                "real Decathlon product that is in stock in your size — or tell you "
+                "plainly when it is not.",
+                size="3",
+                color=MUTED,
+                text_align="center",
+                max_width="46ch",
+                line_height="1.7",
+            ),
+            spacing="3",
+            align="center",
+            padding="3rem 1rem",
+            width="100%",
+        ),
+    )
+
+
+def chat_panel() -> rx.Component:
+    return rx.vstack(
+        empty_state(),
+        rx.foreach(State.messages, bubble),
+        thinking(),
+        spacing="3",
+        width="100%",
+        align="start",
+    )

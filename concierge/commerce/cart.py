@@ -13,7 +13,7 @@ from concierge.domain.models import CartResult, KitItem
 from concierge.obs.trace import emit
 
 
-def _line(variant_gid: str, quantity: int) -> dict[str, Any]:
+def cart_line(variant_gid: str, quantity: int = 1) -> dict[str, Any]:
     return {"item": {"id": variant_gid}, "quantity": quantity}
 
 
@@ -28,7 +28,7 @@ async def create_cart(items: list[KitItem]) -> CartResult:
     if not items:
         raise ValueError("create_cart called with no items")
 
-    lines = [_line(i.variant_id, i.quantity) for i in items]
+    lines = [cart_line(i.variant_id, i.quantity) for i in items]
     cart = await call_ucp("create_cart", {"cart": {"line_items": lines, "context": CONTEXT}})
 
     returned = {(li.get("item") or {}).get("id") for li in cart.get("line_items") or []}
@@ -70,15 +70,18 @@ async def create_cart(items: list[KitItem]) -> CartResult:
     return result
 
 
+# get_cart / update_cart do NOT take create_cart's argument shape (verified live):
+# get_cart is flat, update_cart wants the id at top level AND a cart object, and it
+# REPLACES the lines rather than adding to them.
 async def get_cart(cart_id: str) -> dict[str, Any]:
-    cart = await call_ucp("get_cart", {"cart": {"id": cart_id, "context": CONTEXT}})
+    cart = await call_ucp("get_cart", {"id": cart_id, "context": CONTEXT})
     emit("cart.fetched", {"cart_id": cart_id, "lines": len(cart.get("line_items") or [])})
     return cart
 
 
 async def update_cart(cart_id: str, line_items: list[dict[str, Any]]) -> dict[str, Any]:
     cart = await call_ucp(
-        "update_cart", {"cart": {"id": cart_id, "line_items": line_items, "context": CONTEXT}}
+        "update_cart", {"id": cart_id, "cart": {"line_items": line_items, "context": CONTEXT}}
     )
     emit("cart.updated", {"cart_id": cart_id, "lines": len(cart.get("line_items") or [])})
     return cart

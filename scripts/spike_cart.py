@@ -92,10 +92,6 @@ async def run(args: argparse.Namespace) -> int:
         fetched = await cart_mod.get_cart(result.cart_id)
         print(f"\nget_cart -> keys={sorted(fetched.keys())} lines={len(fetched.get('line_items') or [])}")
 
-    if args.trace:
-        print("\n--- trace ---")
-        for ev in recent():
-            print(f"  [{ev.level}] {ev.event} {ev.payload}")
     return 0
 
 
@@ -115,6 +111,10 @@ def main() -> None:
         try:
             return await run(args)
         finally:
+            if args.trace:
+                print("\n--- trace ---")
+                for ev in recent():
+                    print(f"  [{ev.level}] {ev.event} {ev.payload}")
             await aclose()
             await ucp.aclose()
 

@@ -138,7 +138,13 @@ async def get_collection(handle: str, limit: int = 12) -> list[CatalogProduct]:
 
     r = await client().get(f"{BASE}/collections/{handle}/products.json?limit={limit}")
     r.raise_for_status()
-    products = [map_product(p) for p in r.json().get("products", [])]
+
+    products = []
+    for raw in r.json().get("products", []):
+        try:
+            products.append(map_product(raw))
+        except Exception as exc:  # one malformed product must not cost the whole slot
+            emit("catalog.unmappable", {"handle": raw.get("handle"), "error": str(exc)[:200]}, "error")
     emit("catalog.collection", {"handle": handle, "products": len(products)})
     return products
 
@@ -194,6 +200,9 @@ async def search_fallback(query: str, limit: int = 10) -> list[CatalogProduct]:
     products = [_map_mcp_product(p) for p in data.get("products") or []]
     emit("catalog.search_fallback", {"query": q, "products": len(products)})
     return products
+
+
+search_catalog = search_fallback  # name the agent lane's backend protocol calls
 
 
 def _remember(gid: str, options: list[dict[str, Any]]) -> None:
@@ -318,6 +327,12 @@ def _values(product: dict[str, Any], name: str) -> list[tuple[str, bool]]:
     return []
 
 
+def _next_option(product: dict[str, Any], name: str, seen: list[str]) -> str | None:
+    """A colour value is available when SOME variant of it is in stock, so a sold-out
+    first colour is a false unservable slot unless we try the others."""
+    return next((lab for lab, avail in _values(product, name) if avail and lab not in seen), None)
+
+
 async def resolve_variant(product: CatalogProduct, requested_size: str | None = None) -> ResolvedVariant:
     gid = product.product_gid
     options = await _option_labels(gid)
@@ -326,12 +341,23 @@ async def resolve_variant(product: CatalogProduct, requested_size: str | None = 
     selected = [{"name": o["name"], "label": o["values"][0]} for o in base]
 
     if size_opt is None:
-        grid, selected = await _grid(gid, selected)
-        variants = grid.get("variants") or []
-        if not variants or not (variants[0].get("availability") or {}).get("available"):
-            candidates = _values(grid, base[0]["name"]) if base else []
-            raise NoStockError(product, candidates)
-        return _resolved(product, variants[0], requested_size, False)
+        seen: list[str] = []
+        grid: dict[str, Any] = {}
+        for _ in range(3):
+            grid, selected = await _grid(gid, selected)
+            variants = grid.get("variants") or []
+            if variants and (variants[0].get("availability") or {}).get("available"):
+                return _resolved(product, variants[0], requested_size, False)
+            if not base:
+                break
+            seen.append(selected[0]["label"])
+            nxt = _next_option(grid, base[0]["name"], seen)
+            if nxt is None:
+                break
+            emit("catalog.option_fallback", {"product": gid, "option": base[0]["name"], "label": nxt})
+            selected = [{"name": base[0]["name"], "label": nxt}] + selected[1:]
+        emit("catalog.no_stock", {"product": gid, "title": product.title}, "guardrail")
+        raise NoStockError(product, _values(grid, base[0]["name"]) if base else [])
 
     # a selection must be NON-EMPTY or every value comes back available:null, so a
     # product whose only option is Size is probed with a size instead.
@@ -352,9 +378,7 @@ async def resolve_variant(product: CatalogProduct, requested_size: str | None = 
         if chosen is not None or not base:
             break
         tried.append(probe[0]["label"])
-        nxt = next(
-            (lab for lab, avail in _values(grid, base[0]["name"]) if avail and lab not in tried), None
-        )
+        nxt = _next_option(grid, base[0]["name"], tried)
         if nxt is None:
             break
         emit("catalog.option_fallback", {"product": gid, "option": base[0]["name"], "label": nxt})
@@ -380,6 +404,17 @@ async def resolve_variant(product: CatalogProduct, requested_size: str | None = 
     if not variants:
         raise NoStockError(product, sizes)
     return _resolved(product, variants[0], requested_size, substituted)
+
+
+async def try_resolve_variant(
+    product: CatalogProduct, requested_size: str | None = None
+) -> ResolvedVariant | None:
+    """None instead of NoStockError, for callers that treat a sold-out product as an
+    unservable slot. Rate limits still propagate."""
+    try:
+        return await resolve_variant(product, requested_size)
+    except NoStockError:
+        return None
 
 
 def _resolved(
