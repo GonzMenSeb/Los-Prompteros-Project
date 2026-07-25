@@ -31,6 +31,20 @@ FIXTURE_MODE = os.environ.get("CONCIERGE_FIXTURE_MODE", "0") not in ("0", "false
 _STEP_DELAY = 0.25
 _POLL_INTERVAL = 0.15
 
+_SESSIONS: dict[str, Any] = {}
+
+
+def _session_for(token: str) -> Any:
+    from concierge.agent.loop import ConversationSession
+
+    if token not in _SESSIONS:
+        _SESSIONS[token] = ConversationSession()
+    return _SESSIONS[token]
+
+
+def _reset_session(token: str) -> None:
+    _SESSIONS.pop(token, None)
+
 
 class Citation(BaseModel):
     title: str
@@ -58,7 +72,9 @@ class KitCard(BaseModel):
     slot_label: str
     product_title: str
     product_url: str
-    image_url: str
+    # KitItem.image_url is `Url | None` — a real in-stock product without a photo
+    # is still buyable. "" is the placeholder signal; never let None reach here.
+    image_url: str = ""
     size_label: str
     quantity: int
     quantity_label: str
@@ -197,6 +213,13 @@ class State(rx.State):
         self.unservable_slots = list(kit.unservable_slots)
         self.budget_minor = kit.budget_minor
 
+    def _reset_cart(self) -> None:
+        self.cart_id = ""
+        self.cart_url = ""
+        self.cart_total_minor = 0
+        self.cart_line_count = 0
+        self.cart_expires_at = ""
+
     def _apply_cart(self, cart: CartResult) -> None:
         self.cart_id = cart.cart_id
         self.cart_url = cart.continue_url
@@ -208,16 +231,13 @@ class State(rx.State):
         self.show_trace = not self.show_trace
 
     def clear(self):
+        _reset_session(self.router.session.client_token)
         self.messages = []
         self.kit_items = []
         self.unservable_slots = []
         self.budget_minor = None
         self.trace = []
-        self.cart_id = ""
-        self.cart_url = ""
-        self.cart_total_minor = 0
-        self.cart_line_count = 0
-        self.cart_expires_at = ""
+        self._reset_cart()
         self.is_thinking = False
         self.awaiting_confirmation = False
         self.status = ""
@@ -235,13 +255,22 @@ class State(rx.State):
         self.messages.append(ChatMessage(role="user", content=text))
         self.is_thinking = True
         self.status = "Reading the conditions…"
-        self.trace = []
         self.awaiting_confirmation = False
+        # A new turn supersedes the previous cart. Leaving these set would keep
+        # `has_cart` true and permanently hide the confirm button on turn two.
+        self._reset_cart()
         yield
 
+        # The trace accumulates across turns rather than resetting: the intent
+        # verdict and the grounded search happen on turn one, and those are the
+        # artifacts a judge is reading for. `clear()` is the reset.
         sink: list[TraceEvent] = []
         bind_sink(sink)
         try:
+            emit("turn.start", {"turn": len(self.messages) // 2 + 1, "text": text[:160]})
+            self._drain(sink)
+            yield
+
             if FIXTURE_MODE:
                 async for _ in self._fixture_turn(sink):
                     yield
@@ -286,11 +315,21 @@ class State(rx.State):
     async def _live_turn(self, sink: list[TraceEvent], text: str):
         # Imported inside the handler: the agent lane owns this module and it must
         # not be a module-scope import while the lanes build concurrently.
+        from concierge.agent import tools
         from concierge.agent.loop import run_turn
+        from concierge.commerce import catalog
 
-        history = [(m.role, m.content) for m in self.messages[:-1]]
-        task = asyncio.create_task(run_turn(text, history=history))
+        # Without this the loop dispatches against agent/stubs.py and serves
+        # fixture data while claiming to be live — the one failure that would
+        # invalidate the whole demo.
+        tools.set_backend(catalog)
 
+        # ConversationSession carries the profile, derived slots and product cache
+        # between turns, so it must outlive a single handler. Reflex state cannot
+        # hold a dataclass, hence the module-level map keyed per browser session.
+        session = _session_for(self.router.session.client_token)
+
+        task = asyncio.create_task(run_turn(text, session))
         while not task.done():
             await asyncio.sleep(_POLL_INTERVAL)
             if self._drain(sink):
@@ -300,26 +339,18 @@ class State(rx.State):
         if self._drain(sink):
             yield
 
-        kit = getattr(result, "kit", None)
-        if kit is not None:
-            self._apply_kit(kit)
+        if result.kit is not None:
+            self._apply_kit(result.kit)
 
+        self.unservable_slots = list(result.unservable_slots or self.unservable_slots)
         self.messages.append(
             ChatMessage(
                 role="assistant",
-                content=getattr(result, "reply", "") or "",
-                citations=[
-                    Citation(
-                        title=getattr(c, "title", "") or str(c),
-                        url=getattr(c, "url", "") or str(c),
-                    )
-                    for c in (getattr(result, "citations", None) or [])
-                ],
+                content=result.text,
+                citations=[Citation(title=c.title, url=c.uri) for c in result.citations],
             )
         )
-        self.awaiting_confirmation = bool(self.kit_items) and bool(
-            getattr(result, "awaiting_confirmation", True)
-        )
+        self.awaiting_confirmation = bool(self.kit_items) and result.offer_cart
         yield
 
     @rx.event

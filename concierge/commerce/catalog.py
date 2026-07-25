@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 from concierge.commerce.ucp import CONTEXT, call_ucp
+from concierge.domain.guardrails import check_query_shape
 from concierge.domain.models import (
     CatalogProduct,
     CatalogVariant,
@@ -149,23 +150,12 @@ async def get_collection(handle: str, limit: int = 12) -> list[CatalogProduct]:
     return products
 
 
-_UNITS = {
-    "c", "f", "celsius", "fahrenheit", "deg", "degree", "degrees", "cm", "mm", "m", "km",
-    "g", "kg", "lb", "lbs", "oz", "l", "liter", "liters", "litre", "litres", "ml",
-    "hour", "hours", "day", "days", "night", "nights", "person", "people", "season",
-    "rated", "rating", "below", "under", "over", "up", "temp", "temperature", "size",
-}
-
-
 def sanitize_query(q: str) -> str:
-    """Descriptive queries return ZERO (SPEC.md §3.3) — conditions and specs belong
-    in the selection step, never in the query. Reduce to a 1-3 word head noun phrase."""
-    words = [w for w in re.split(r"[^A-Za-z0-9]+", q) if w]
-    kept = [w for w in words if not any(ch.isdigit() for ch in w) and w.lower() not in _UNITS | _STOP]
-    out = " ".join(kept[-3:])
-    if out != q:
-        emit("catalog.query_sanitized", {"raw": q, "query": out}, "guardrail")
-    return out
+    """Descriptive queries return ZERO (SPEC.md §3.3) — conditions and specs belong in
+    the selection step, never in the query. One implementation, in domain/guardrails.py.
+    An empty return means the query held no searchable noun: skip the search entirely
+    rather than reducing "under 2 kg" to a keyword that cannot match."""
+    return check_query_shape(q)
 
 
 def _map_mcp_product(raw: dict[str, Any]) -> CatalogProduct:
@@ -193,6 +183,10 @@ def _map_mcp_product(raw: dict[str, Any]) -> CatalogProduct:
 
 async def search_fallback(query: str, limit: int = 10) -> list[CatalogProduct]:
     q = sanitize_query(query)
+    if not q:
+        emit("catalog.search_skipped", {"raw": query}, "guardrail")
+        return []
+
     data = await call_ucp(
         "search_catalog",
         {"catalog": {"query": q, "context": CONTEXT, "pagination": {"limit": limit}}},

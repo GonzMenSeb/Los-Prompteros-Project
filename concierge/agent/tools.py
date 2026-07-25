@@ -123,7 +123,7 @@ async def get_collection_products(handle: str = "", limit: int = MAX_PRODUCTS, *
     _remember(products)
 
     if not products:
-        emit("guardrail.empty_collection", {"handle": handle}, level="guardrail")
+        emit("guardrail.empty_collection", {"handles": [handle]}, level="guardrail")
         return {
             "handle": handle,
             "products": [],

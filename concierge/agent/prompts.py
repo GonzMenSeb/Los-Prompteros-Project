@@ -209,12 +209,18 @@ this object has no candidates at all.
 {products}
 
 RULES
-  * One pick per slot, best fit for the conditions and the budget.
+  * Normally one pick per slot, best fit for the conditions and the budget.
   * product_handle must be copied character-for-character from the list above. \
 A handle that is not on the list is dropped and the slot ends up empty.
-  * size: copy a string from that product's size_labels, choosing the one \
-matching the user's stated size. Leave it empty if no size was given.
-  * quantity: 1, or the party size for a per-person slot.
+  * sizes: one entry PER PERSON for a per-person slot, copied from that product's \
+size_labels and matching each person's stated size. Two people at different sizes \
+means two entries. Leave the list empty when no size was given or the product has \
+no size. For shared kit such as a tent, leave it empty.
+  * When the party needs DIFFERENT products for the same slot — a men's and a \
+women's boot, for instance — emit two picks for that slot, each with that \
+person's size. Do not put two people into one gendered product.
+  * quantity: only used when sizes is empty. 1, or the party size for a \
+per-person slot.
   * rationale: one sentence tying the choice to a trip condition. State no \
 specification that is not in the product title.
   * unservable_slots: every slot for which you retrieved nothing usable. Be \

@@ -183,6 +183,15 @@ def check_budget(kit: Kit, budget_minor: int | None = None) -> BudgetVerdict:
         emit("guardrail.budget", verdict.model_dump(), "guardrail")
         return verdict
 
+    if not kit.items:
+        # "kit us both out for $40" that fits nothing must not report "$40 under
+        # budget" — an empty kit is the nothing-fits case, not a cheap one.
+        verdict.ok = False
+        verdict.nothing_fits = True
+        verdict.message = f"Nothing fits {minor_to_display(budget)} — I could not put a single item in the kit."
+        emit("guardrail.budget", verdict.model_dump(), "guardrail")
+        return verdict
+
     if total <= budget:
         verdict.message = (
             f"{minor_to_display(total)} of {minor_to_display(budget)} — "
@@ -363,7 +372,30 @@ _CLAIM_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("material", re.compile(r"(?i)\b(?:merino|goose\s+down|duck\s+down|down\s+fill|ripstop|cordura|primaloft|polyester|nylon|leather|fleece)\b")),
     ("material", re.compile(r"(?i)\b\d+\s*(?:fill\s*power|fp)\b")),
     ("weight", re.compile(r"(?i)\b\d+(?:\.\d+)?\s*(?:kg|kgs|g|grams?|lbs?|pounds?|oz|ounces?)\b")),
+    ("price", re.compile(r"\$\s?\d[\d,]*(?:\.\d{1,2})?")),
 ]
+
+
+def _price_minor(text: str) -> int | None:
+    try:
+        return round(float(text.replace("$", "").replace(",", "").strip()) * 100)
+    except ValueError:
+        return None
+
+
+def _allowed_prices(items: Sequence[Any], extra: Iterable[int]) -> set[int]:
+    """A price in prose must be one the code computed: a unit price, a line total,
+    the kit total, or a figure the caller explicitly whitelists (a budget)."""
+    unit: list[int] = []
+    line: list[int] = []
+    for i in items:
+        price = i.get("price_minor") if isinstance(i, Mapping) else getattr(i, "price_minor", None)
+        if not isinstance(price, int):
+            continue
+        qty = i.get("quantity", 1) if isinstance(i, Mapping) else getattr(i, "quantity", 1)
+        unit.append(price)
+        line.append(price * (qty if isinstance(qty, int) else 1))
+    return {*unit, *line, sum(line), *extra}
 
 
 def _normalise(s: str) -> str:
@@ -379,7 +411,9 @@ def _compact(s: str) -> str:
     return re.sub(r"[\s\-]", "", s)
 
 
-_BACKING_FIELDS = ("product_title", "title", "size_label", "product_type", "vendor", "description")
+# `handle` earns its place: it is a live catalog slug, so "hiking-fleeces-mid-layers"
+# legitimately backs the word "fleece". `rationale` and `slot` are model-authored.
+_BACKING_FIELDS = ("product_title", "title", "handle", "size_label", "product_type", "vendor", "description")
 
 
 def _backing_text(items: Sequence[Any]) -> str:
@@ -397,7 +431,9 @@ def _backing_text(items: Sequence[Any]) -> str:
     return _compact(" | ".join(parts))
 
 
-def find_unbacked_claims(text: str, items: Sequence[Any]) -> list[SpecClaim]:
+def find_unbacked_claims(
+    text: str, items: Sequence[Any], *, allowed_minor: Iterable[int] = ()
+) -> list[SpecClaim]:
     """Spec-shaped claims in model prose that no retrieved field backs.
 
     The agent will not invent products — retrieval prevents that. It invents
@@ -449,20 +485,31 @@ def scrub_prose(text: str, items: Sequence[Any]) -> str:
     return out
 
 
+# Cutting here drops the condition clause. "down" must NOT be in this set: it reads
+# as a preposition in "rated down to -5" but it is a product word — "rated" already
+# cuts that phrase, while "down jacket" is a real query against four live collections.
 _STOP_AT = {
     "for", "with", "in", "at", "on", "under", "over", "above", "below", "rated",
-    "that", "which", "to", "down", "good", "suitable", "and", "or",
+    "that", "which", "to", "good", "suitable", "and", "or",
 }
 _UNIT_WORDS = {
     "degree", "degrees", "celsius", "fahrenheit", "c", "f", "l", "litre", "litres",
     "liter", "liters", "kg", "g", "gram", "grams", "lb", "lbs", "oz", "mm", "cm",
-    "person", "people", "season", "seasons", "star", "stars",
+    "person", "people", "season", "seasons", "star", "stars", "size", "sizes",
+    "hour", "hours", "day", "days", "night", "nights", "week", "weeks",
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
 }
+# "down" and "warm" are NOT filler: they are product words here. Decathlon ships
+# four `*-down-jackets` collections, and "Warm" is in a quarter of live titles.
 _FILLER = {
     "a", "an", "the", "some", "any", "i", "me", "my", "we", "our", "us", "you", "your",
     "it", "is", "are", "please", "need", "needs", "want", "looking", "get", "buy",
-    "recommend", "something", "good", "best", "warm", "cheap",
+    "recommend", "something", "best", "cheap",
 }
+
+
+def _drop(t: str) -> bool:
+    return any(ch.isdigit() for ch in t) or t in _UNIT_WORDS or t in _FILLER
 
 
 def check_query_shape(q: str) -> str:
@@ -474,11 +521,15 @@ def check_query_shape(q: str) -> str:
     for t in tokens:
         if t in _STOP_AT:
             break
-        if any(ch.isdigit() for ch in t) or t in _UNIT_WORDS or t in _FILLER:
-            continue
-        kept.append(t)
+        if not _drop(t):
+            kept.append(t)
+
+    # An empty query is worse than a loose one — search_catalog would be handed "".
+    # Retry ignoring the cut, since the head noun can sit behind a stop word.
+    if not kept:
+        kept = [t for t in tokens if t not in _STOP_AT and not _drop(t)]
 
     shaped = " ".join(kept[-3:])
     if shaped != _normalise(q).strip():
-        emit("guardrail.query_shape", {"original": q, "shaped": shaped}, "guardrail")
+        emit("guardrail.query_shape", {"original": q, "shaped": shaped, "empty": not shaped}, "guardrail")
     return shaped

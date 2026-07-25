@@ -38,7 +38,9 @@ def gemini_client() -> genai.Client:
     key = os.environ.get("GEMINI_API_KEY")
     if not key:
         raise RuntimeError("GEMINI_API_KEY missing — put it in .env")
-    return genai.Client(api_key=key)
+    # Without an explicit timeout a stalled request hangs the turn forever, which
+    # on stage is indistinguishable from a crash.
+    return genai.Client(api_key=key, http_options=types.HttpOptions(timeout=120_000))
 
 
 async def generate(**kwargs: Any) -> types.GenerateContentResponse:

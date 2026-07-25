@@ -85,9 +85,48 @@ async def main() -> int:
         )
     )
 
+    print("\nsecond turn after a cart exists …")
+    trace_before = len(state.trace)
+    async for _ in state.send_message({"message": "swap the tent for the cheaper one"}):
+        pass
+    results.append(check("stale cart cleared", state.has_cart is False))
+    results.append(check("confirm button reachable again", state.awaiting_confirmation is True))
+    results.append(
+        check("trace accumulates across turns", len(state.trace) > trace_before,
+              f"{trace_before} -> {len(state.trace)}")
+    )
+    results.append(
+        check("turn.start separates turns", sum(r.event == "turn.start" for r in state.trace) == 2)
+    )
+    results.append(
+        check("turn-one grounding still visible",
+              any(r.event == "search.grounded" for r in state.trace))
+    )
+
     print("\nclear …")
     state.clear()
     results.append(check("clear resets everything", not state.kit_items and not state.trace and not state.cart_url))
+
+    print("\nKitItem without a photo …")
+    # No fixture product lacks an image, so this path is only reachable from live
+    # retrieval. It must degrade to one placeholder card, not kill the turn.
+    from concierge.domain.models import KitItem
+
+    photoless = KitItem(
+        slot="tent",
+        product_title="A real in-stock product that has no photo",
+        product_url="https://www.decathlon.com/products/x",
+        variant_id="gid://shopify/ProductVariant/1",
+        size_label="One Size",
+        price_minor=1000,
+        available=True,
+    )
+    results.append(check("KitItem.image_url defaults to None", photoless.image_url is None))
+    card = to_card(photoless)
+    results.append(check("to_card does not raise on a None photo", card.image_url == ""))
+    results.append(
+        check("placeholder card keeps its title", card.product_title == photoless.product_title)
+    )
 
     print("\nsummarise() on nested payloads …")
     results.append(

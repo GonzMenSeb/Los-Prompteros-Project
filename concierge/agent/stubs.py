@@ -183,12 +183,15 @@ async def resolve_variant(
                     requested_size=requested_size,
                 )
 
+    # Only a real swap counts as a substitution. A product with one variant, or
+    # whose variants differ by colour alone, offered no size to miss.
     v = live[0]
+    swappable = len(live) > 1 and any(_size_tokens(x.size_label) for x in live)
     return ResolvedVariant(
         variant_gid=v.variant_gid,
         size_label=v.size_label,
         price_minor=v.price_minor,
         available=True,
-        substituted=bool(requested_size),
+        substituted=bool(requested_size) and swappable,
         requested_size=requested_size,
     )

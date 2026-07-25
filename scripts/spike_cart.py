@@ -63,10 +63,6 @@ async def run(args: argparse.Namespace) -> int:
     print(f"  price={minor_to_display(variant.price_minor)}  substituted={variant.substituted}"
           f"  requested={variant.requested_size!r}")
 
-    if picked.image_url is None:
-        print("  no image -> cannot build a KitItem (KitItem.image_url is required)")
-        return 4
-
     item = KitItem(
         slot=args.handle,
         product_title=picked.title,

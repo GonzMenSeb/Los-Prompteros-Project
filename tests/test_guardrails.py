@@ -178,10 +178,18 @@ class TestCheckBudget:
         assert "$65.00" in v.message  # the real cheapest, quoted from the kit
         assert guardrail_events(sink)
 
-    def test_empty_kit_with_a_tiny_budget_is_not_over_budget(self):
+    def test_empty_kit_under_a_budget_is_nothing_fits_not_under_budget(self):
+        """The same judge scenario from the other side: if the loop fitted nothing
+        into $40, saying '$40.00 under budget' is worse than the invented tent."""
         v = check_budget(Kit(items=[]), 4000)
-        assert v.ok
+        assert v.nothing_fits is True
+        assert v.ok is False
+        assert "Nothing fits" in v.message
+
+    def test_empty_kit_with_no_budget_is_silent_about_fit(self):
+        v = check_budget(Kit(items=[]))
         assert v.nothing_fits is False
+        assert v.ok
 
     def test_verdict_is_emitted_at_guardrail_level(self, sink):
         check_budget(Kit(items=[item()]), 100)
@@ -398,13 +406,49 @@ class TestCheckQueryShape:
             ("tent", "tent"),
             ("waterproof hiking boots for icy trails", "waterproof hiking boots"),
             ("a 2 person tent for alpine camping", "tent"),
-            ("I need a warm jacket", "jacket"),
+            ("I need a warm jacket", "warm jacket"),
             ("60L backpacking pack with rain cover", "backpacking pack"),
             ("merino base layer rated to -5C", "merino base layer"),
+            ("hiking boots size 10.5", "hiking boots"),
         ],
     )
     def test_shapes_to_a_short_noun_phrase(self, query, shaped):
         assert check_query_shape(query) == shaped
+
+    @pytest.mark.parametrize(
+        "query,shaped",
+        [
+            ("down jacket", "down jacket"),
+            ("womens down jacket", "womens down jacket"),
+            ("0F down sleeping bag rated for -10 C", "down sleeping bag"),
+            ("warm sleeping bag", "warm sleeping bag"),
+        ],
+    )
+    def test_product_words_are_not_mistaken_for_prepositions(self, query, shaped):
+        """'down' reads as a preposition in "rated down to -5" but Decathlon ships
+        four *-down-jackets collections, and 'Warm' is in a quarter of live titles."""
+        assert check_query_shape(query) == shaped
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "good down to -5",
+            "with 3000m of ascent in a down jacket",
+            "sleeping bag under 2 kg",
+            "rated down to -5 sleeping bag",
+        ],
+    )
+    def test_a_query_containing_a_noun_never_shapes_to_empty(self, query):
+        """An empty string handed to search_catalog is worse than a loose query, so
+        the cut is retried without the stop-word break before giving up."""
+        assert check_query_shape(query).strip()
+
+    @pytest.mark.parametrize("query", ["rated for -10 C", "under 2 kg", "for two nights", ""])
+    def test_a_query_with_no_noun_at_all_shapes_to_empty_and_says_so(self, query, sink):
+        """Nothing here is searchable. Returning '' is honest — the caller must skip
+        the search rather than send conditions as a keyword query (SPEC.md §3.3)."""
+        assert check_query_shape(query) == ""
+        assert all(e.payload["empty"] is True for e in guardrail_events(sink))
 
     def test_never_exceeds_three_words(self):
         long = "a really excellent lightweight waterproof breathable alpine mountaineering hardshell jacket"
