@@ -1,3 +1,6 @@
+.states
+assets/external/
+.web
 # Secrets
 .env
 .env.*
@@ -25,3 +28,7 @@ run.log
 
 # Vendored binaries — fetched by `make setup`, never committed
 bin/
+
+# Reflex
+.states/
+reflex.lock/

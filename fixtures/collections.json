@@ -1,0 +1,914 @@
+[
+ {
+  "handle": "camping-tents-2-3-person",
+  "title": "2-Person Tents"
+ },
+ {
+  "handle": "2024-sea-otter-collection",
+  "title": "2024 Sea Otter Collection"
+ },
+ {
+  "handle": "3-person-camping-tents",
+  "title": "3-Person Tents"
+ },
+ {
+  "handle": "camping-tents-4-6-person",
+  "title": "4 to 6-Person Tents"
+ },
+ {
+  "handle": "all-kids-outdoor-gear",
+  "title": "All Kids Outdoor Gear"
+ },
+ {
+  "handle": "apparel-for-the-rain",
+  "title": "Apparel for the Rain"
+ },
+ {
+  "handle": "backpack-accessories",
+  "title": "Backpack Accessories"
+ },
+ {
+  "handle": "backpacking-packs",
+  "title": "Backpacking Packs"
+ },
+ {
+  "handle": "backpacking-pads",
+  "title": "Backpacking Pads"
+ },
+ {
+  "handle": "mens-backpacks-and-bags",
+  "title": "Backpacks for Men"
+ },
+ {
+  "handle": "womens-backpacks-and-bags",
+  "title": "Backpacks for Women"
+ },
+ {
+  "handle": "backpacks-bags",
+  "title": "Bags & Backpacks"
+ },
+ {
+  "handle": "base-layers-thermal-underwear",
+  "title": "Base Layers & Thermal Underwear"
+ },
+ {
+  "handle": "base-layers",
+  "title": "Base Layers & Thermal Underwear"
+ },
+ {
+  "handle": "hike-camp-shelters",
+  "title": "Beach Tents & Shelters"
+ },
+ {
+  "handle": "beanies-neckwarmers",
+  "title": "Beanies & Neck Warmers"
+ },
+ {
+  "handle": "best-sellers",
+  "title": "Best Sellers"
+ },
+ {
+  "handle": "best-selling-gifts",
+  "title": "Best Selling Gifts"
+ },
+ {
+  "handle": "bike-accessories",
+  "title": "Bike Accessories"
+ },
+ {
+  "handle": "bike-packing",
+  "title": "Bike Bags: Frame, Handlebar, Saddle Bags"
+ },
+ {
+  "handle": "bike-helmet",
+  "title": "Bike Helmets"
+ },
+ {
+  "handle": "bike-maintenance-storage",
+  "title": "Bike Inner Tubes & Bike Pumps"
+ },
+ {
+  "handle": "bikes",
+  "title": "Bikes"
+ },
+ {
+  "handle": "bikes-cycling-deals",
+  "title": "Bikes & Cycling Deals"
+ },
+ {
+  "handle": "black-friday-deals-old",
+  "title": "Black Friday Deals: Up to 40% Off"
+ },
+ {
+  "handle": "blackout-tents",
+  "title": "Blackout Tents"
+ },
+ {
+  "handle": "btwin",
+  "title": "Btwin"
+ },
+ {
+  "handle": "camp-hike-headlamps",
+  "title": "Camp & Hike Headlamps"
+ },
+ {
+  "handle": "camp-furniture",
+  "title": "Camp Furniture"
+ },
+ {
+  "handle": "kitchen",
+  "title": "Camp Kitchen"
+ },
+ {
+  "handle": "camp-ready-all-your-outdoor-essentials",
+  "title": "Camping"
+ },
+ {
+  "handle": "camping-cookware",
+  "title": "Camping Cookware"
+ },
+ {
+  "handle": "camping-dinnerware",
+  "title": "Camping Dinnerware"
+ },
+ {
+  "handle": "camping-lanterns",
+  "title": "Camping Lanterns"
+ },
+ {
+  "handle": "camping-mattress-cots",
+  "title": "Camping Mattresses & Cots"
+ },
+ {
+  "handle": "camping-pillows",
+  "title": "Camping Pillows"
+ },
+ {
+  "handle": "camping-shower",
+  "title": "Camping Showers"
+ },
+ {
+  "handle": "sleeping",
+  "title": "Camping Sleeping Gear"
+ },
+ {
+  "handle": "camping-tents",
+  "title": "Camping Tents"
+ },
+ {
+  "handle": "clearance-bikes",
+  "title": "Clearance Bikes"
+ },
+ {
+  "handle": "cold-weather-apparel",
+  "title": "Cold Weather Apparel"
+ },
+ {
+  "handle": "convertible-pants-0adz12c",
+  "title": "Convertible Pants"
+ },
+ {
+  "handle": "coolers",
+  "title": "Coolers"
+ },
+ {
+  "handle": "cyber-monday-2024",
+  "title": "Cyber Monday 2024"
+ },
+ {
+  "handle": "bike",
+  "title": "Cycling"
+ },
+ {
+  "handle": "cycling-clothing",
+  "title": "Cycling Clothing"
+ },
+ {
+  "handle": "cycling-gloves",
+  "title": "Cycling Gloves"
+ },
+ {
+  "handle": "cycling-shoes",
+  "title": "Cycling Shoes"
+ },
+ {
+  "handle": "cycling-spare-parts",
+  "title": "Cycling Spare Parts"
+ },
+ {
+  "handle": "daypacks",
+  "title": "Daypacks"
+ },
+ {
+  "handle": "deals",
+  "title": "Deals"
+ },
+ {
+  "handle": "december-deals",
+  "title": "December Deals"
+ },
+ {
+  "handle": "down-jackets-vests",
+  "title": "Down Jackets & Coats"
+ },
+ {
+  "handle": "duffel-bags",
+  "title": "Duffel Bags"
+ },
+ {
+  "handle": "end-of-season-sale",
+  "title": "End of Season Sale"
+ },
+ {
+  "handle": "fathers-day-gift-guide",
+  "title": "Father\u2019s Day Gift Guide"
+ },
+ {
+  "handle": "gifts-under-100",
+  "title": "Favorites Under $100"
+ },
+ {
+  "handle": "gifts-under-50",
+  "title": "Favorites Under $50"
+ },
+ {
+  "handle": "flasks-reservoirs",
+  "title": "Flasks & Reservoirs"
+ },
+ {
+  "handle": "fleece-sweatshirts",
+  "title": "Fleece & Sweatshirts"
+ },
+ {
+  "handle": "hiking-fleeces-mid-layers",
+  "title": "Fleece Jackets & Mid Layers"
+ },
+ {
+  "handle": "footwear",
+  "title": "Footwear"
+ },
+ {
+  "handle": "forclaz",
+  "title": "Forclaz"
+ },
+ {
+  "handle": "get-closer-to-nature-this-earth-day",
+  "title": "Get Closer to Nature This Earth Day"
+ },
+ {
+  "handle": "gifts-for-her",
+  "title": "Gifts For Her"
+ },
+ {
+  "handle": "gifts-for-him",
+  "title": "Gifts For Him"
+ },
+ {
+  "handle": "gifts-that-impress",
+  "title": "Gifts That Impress"
+ },
+ {
+  "handle": "gifts-under-25",
+  "title": "Gifts Under $25"
+ },
+ {
+  "handle": "golf-clubs",
+  "title": "Golf Clubs"
+ },
+ {
+  "handle": "road-gravel-bikes",
+  "title": "Gravel Bikes"
+ },
+ {
+  "handle": "hammocks",
+  "title": "Hammocks"
+ },
+ {
+  "handle": "hike-camp-deals",
+  "title": "Hike & Camp Deals"
+ },
+ {
+  "handle": "camp-hike",
+  "title": "Hiking & Backpacking"
+ },
+ {
+  "handle": "hiking-camping-gifts",
+  "title": "Hiking & Camping Gifts"
+ },
+ {
+  "handle": "all-hiking-backpacks",
+  "title": "Hiking Backpacks"
+ },
+ {
+  "handle": "hiking-boots",
+  "title": "Hiking Boots"
+ },
+ {
+  "handle": "hiking-clothing",
+  "title": "Hiking Clothing"
+ },
+ {
+  "handle": "hiking-gloves",
+  "title": "Hiking Gloves"
+ },
+ {
+  "handle": "hiking-hats",
+  "title": "Hiking Hats"
+ },
+ {
+  "handle": "hiking-jackets",
+  "title": "Hiking Jackets"
+ },
+ {
+  "handle": "hiking-pants",
+  "title": "Hiking Pants"
+ },
+ {
+  "handle": "hiking-camp-accessories",
+  "title": "Hiking Poles"
+ },
+ {
+  "handle": "hiking-sandals",
+  "title": "Hiking Sandals"
+ },
+ {
+  "handle": "hiking-shirts",
+  "title": "Hiking Shirts"
+ },
+ {
+  "handle": "hike-camp-shoes",
+  "title": "Hiking Shoes"
+ },
+ {
+  "handle": "hiking-shorts",
+  "title": "Hiking Shorts"
+ },
+ {
+  "handle": "hiking-snow-jackets",
+  "title": "Hiking Snow Jackets"
+ },
+ {
+  "handle": "hiking-socks",
+  "title": "Hiking Socks"
+ },
+ {
+  "handle": "home-trainers",
+  "title": "Home Trainers"
+ },
+ {
+  "handle": "hydration",
+  "title": "Hydration"
+ },
+ {
+  "handle": "inflatable-tents",
+  "title": "Inflatable Tents"
+ },
+ {
+  "handle": "jackets-outerwear",
+  "title": "Jackets & Outerwear"
+ },
+ {
+  "handle": "kids-backpacks",
+  "title": "Kids Backpacks"
+ },
+ {
+  "handle": "kids-bikes",
+  "title": "Kids Bikes"
+ },
+ {
+  "handle": "kids-outdoor-clothing",
+  "title": "Kids Outdoor Clothing"
+ },
+ {
+  "handle": "kids-outdoor-footwear",
+  "title": "Kids Outdoor Footwear"
+ },
+ {
+  "handle": "kiprun",
+  "title": "Kiprun"
+ },
+ {
+  "handle": "kiprun-road-running-shoes",
+  "title": "Kiprun Road Running Shoes"
+ },
+ {
+  "handle": "kiprun-shoes",
+  "title": "Kiprun Shoes"
+ },
+ {
+  "handle": "kiprun-trail-running-shoes",
+  "title": "Kiprun Trail Running Shoes"
+ },
+ {
+  "handle": "labor-day-sale",
+  "title": "Labor Day Sale"
+ },
+ {
+  "handle": "lifestyle-packs",
+  "title": "Laptop Backpacks"
+ },
+ {
+  "handle": "lighting",
+  "title": "Lighting"
+ },
+ {
+  "handle": "liners-accessories-repair",
+  "title": "Liners, Accessories & Repair"
+ },
+ {
+  "handle": "memorial-day-sale",
+  "title": "Memorial Day Outdoor Gear Sale \u2013 Up to 50% Off"
+ },
+ {
+  "handle": "memorial-day-sale-up-to-30-off",
+  "title": "Memorial Day Sale - Up to 30% Off"
+ },
+ {
+  "handle": "mens",
+  "title": "Men's"
+ },
+ {
+  "handle": "mens-base-layers",
+  "title": "Men's Base Layers & Thermal Underwear"
+ },
+ {
+  "handle": "mens-cycling-clothing",
+  "title": "Men's Cycling Clothing"
+ },
+ {
+  "handle": "mens-deals",
+  "title": "Men's Deals"
+ },
+ {
+  "handle": "mens-down-jackets",
+  "title": "Men's Down Jackets & Coats"
+ },
+ {
+  "handle": "mens-fleeces-mid-layers",
+  "title": "Men's Fleece Jackets & Vests"
+ },
+ {
+  "handle": "mens-footwear",
+  "title": "Men's Footwear"
+ },
+ {
+  "handle": "mens-gloves",
+  "title": "Men's Gloves"
+ },
+ {
+  "handle": "mens-hats-beanies",
+  "title": "Men's Hats & Beanies"
+ },
+ {
+  "handle": "mens-hiking-boots",
+  "title": "Men's Hiking Boots"
+ },
+ {
+  "handle": "mens-hiking-shoe",
+  "title": "Men's Hiking Shoes"
+ },
+ {
+  "handle": "mens-jackets",
+  "title": "Men's Jackets & Coats"
+ },
+ {
+  "handle": "mens-long-sleeved-t-shirts",
+  "title": "Men's Long-sleeved Shirts"
+ },
+ {
+  "handle": "mens-merino-wool-apparel",
+  "title": "Men's Merino Wool Clothes"
+ },
+ {
+  "handle": "mens-pants",
+  "title": "Men's Pants"
+ },
+ {
+  "handle": "mens-pants-shorts",
+  "title": "Men's Pants & Shorts"
+ },
+ {
+  "handle": "mens-synthetic-padded-jackets-vests",
+  "title": "Men's Puffer Jackets & Vests"
+ },
+ {
+  "handle": "mens-rain-snow-jacket",
+  "title": "Men's Rain Jackets & Raincoats"
+ },
+ {
+  "handle": "mens-sandals",
+  "title": "Men's Sandals"
+ },
+ {
+  "handle": "mens-shirts-1",
+  "title": "Men's Shirts"
+ },
+ {
+  "handle": "mens-shorts",
+  "title": "Men's Shorts"
+ },
+ {
+  "handle": "mens-socks",
+  "title": "Men's Socks"
+ },
+ {
+  "handle": "mens-shirts",
+  "title": "Men's T-Shirts"
+ },
+ {
+  "handle": "mens-tops",
+  "title": "Men's Tops"
+ },
+ {
+  "handle": "mens-windbreaker-jackets",
+  "title": "Men's Windbreaker Jackets"
+ },
+ {
+  "handle": "mens-winter-jackets-coats",
+  "title": "Men's Winter Jackets"
+ },
+ {
+  "handle": "merino-wool-hiking-clothes",
+  "title": "Merino Wool Clothes"
+ },
+ {
+  "handle": "mountain-bikes",
+  "title": "Mountain Bikes"
+ },
+ {
+  "handle": "mountaineering-backpacks",
+  "title": "Mountaineering Backpacks"
+ },
+ {
+  "handle": "new-arrivals",
+  "title": "New Arrivals"
+ },
+ {
+  "handle": "new-arrivals-bike-cycling",
+  "title": "New Arrivals - Bike & Cycling"
+ },
+ {
+  "handle": "new-arrivals-hike-camp",
+  "title": "New Arrivals - Hike & Camp"
+ },
+ {
+  "handle": "new-arrivals-kids",
+  "title": "New Arrivals - Kids"
+ },
+ {
+  "handle": "new-arrivals-running",
+  "title": "New Arrivals - Running"
+ },
+ {
+  "handle": "one-backpack-a-decade-of-journeys",
+  "title": "One Backpack. A Decade of Journeys."
+ },
+ {
+  "handle": "pop-up-camping-tents",
+  "title": "Pop Up Camping Tents"
+ },
+ {
+  "handle": "synthetic-puffer-jackets-vests",
+  "title": "Puffer Jackets & Vests"
+ },
+ {
+  "handle": "quechua",
+  "title": "Quechua"
+ },
+ {
+  "handle": "rain-snow-jackets",
+  "title": "Rain Jackets & Raincoats"
+ },
+ {
+  "handle": "ready-for-class-ready-for-anything",
+  "title": "Ready for Class. Ready for Anything."
+ },
+ {
+  "handle": "outdoor-repair-replacement-parts",
+  "title": "Repair & Replacement Parts"
+ },
+ {
+  "handle": "riverside",
+  "title": "Riverside"
+ },
+ {
+  "handle": "road-bikes",
+  "title": "Road Bikes"
+ },
+ {
+  "handle": "rockrider",
+  "title": "Rockrider"
+ },
+ {
+  "handle": "running",
+  "title": "Running"
+ },
+ {
+  "handle": "running-belts-hydration-vests",
+  "title": "Running Belts & Hydration Vests"
+ },
+ {
+  "handle": "running-clothing",
+  "title": "Running Clothing"
+ },
+ {
+  "handle": "running-hats",
+  "title": "Running Hats"
+ },
+ {
+  "handle": "shirts-tops",
+  "title": "Running Shirts & Tops"
+ },
+ {
+  "handle": "running-shorts-1",
+  "title": "Running Shorts"
+ },
+ {
+  "handle": "socks",
+  "title": "Running Socks"
+ },
+ {
+  "handle": "shop-all",
+  "title": "Shop All"
+ },
+ {
+  "handle": "ski-base-layers",
+  "title": "Ski Base Layers"
+ },
+ {
+  "handle": "ski-beanies",
+  "title": "Ski Beanies"
+ },
+ {
+  "handle": "ski-beanies-gloves-socks",
+  "title": "Ski Beanies, Gloves, & Socks"
+ },
+ {
+  "handle": "ski-hats-beanies",
+  "title": "Ski Hats & Beanies"
+ },
+ {
+  "handle": "ski-jackets",
+  "title": "Ski Jackets"
+ },
+ {
+  "handle": "ski-mittens-gloves",
+  "title": "Ski Mittens & Gloves"
+ },
+ {
+  "handle": "ski-pants",
+  "title": "Ski Pants"
+ },
+ {
+  "handle": "sleeping-bags",
+  "title": "Sleeping Bags"
+ },
+ {
+  "handle": "snow-ski",
+  "title": "Snow & Ski"
+ },
+ {
+  "handle": "snow-ski-kids",
+  "title": "Snow & Ski Kids"
+ },
+ {
+  "handle": "snow-boots",
+  "title": "Snow Boots"
+ },
+ {
+  "handle": "snow-boots-1",
+  "title": "Snow Boots"
+ },
+ {
+  "handle": "apparel-for-the-snow",
+  "title": "Snow Gear"
+ },
+ {
+  "handle": "snow-hiking",
+  "title": "Snow Hiking"
+ },
+ {
+  "handle": "snow-hiking-down-jackets",
+  "title": "Snow Hiking Down Jackets"
+ },
+ {
+  "handle": "snow-hiking-fleeces",
+  "title": "Snow Hiking Fleeces"
+ },
+ {
+  "handle": "snow-hiking-gloves",
+  "title": "Snow Hiking Gloves"
+ },
+ {
+  "handle": "snow-hiking-hats",
+  "title": "Snow Hiking Hats"
+ },
+ {
+  "handle": "snow-hiking-pants",
+  "title": "Snow Hiking Pants"
+ },
+ {
+  "handle": "snow-hiking-socks",
+  "title": "Snow Hiking Socks"
+ },
+ {
+  "handle": "snow-pants",
+  "title": "Snow Pants"
+ },
+ {
+  "handle": "snowshoes",
+  "title": "Snowshoes"
+ },
+ {
+  "handle": "hiking-backpacking-copy",
+  "title": "Spring Collection"
+ },
+ {
+  "handle": "spring-hiking-collection",
+  "title": "Spring Hiking Collection"
+ },
+ {
+  "handle": "camp-stoves",
+  "title": "Stoves"
+ },
+ {
+  "handle": "sweaters",
+  "title": "Sweaters"
+ },
+ {
+  "handle": "tent-accessories",
+  "title": "Tent Accessories"
+ },
+ {
+  "handle": "tents",
+  "title": "Tents"
+ },
+ {
+  "handle": "travel-packs",
+  "title": "Travel Backpacks"
+ },
+ {
+  "handle": "travel-packs-duffel-bags",
+  "title": "Travel Packs & Duffel Bags"
+ },
+ {
+  "handle": "unisex-road-bikes-0aqz00a-1",
+  "title": "Unisex Road Bikes"
+ },
+ {
+  "handle": "van-rysel",
+  "title": "Van Rysel"
+ },
+ {
+  "handle": "warm-weather-apparel",
+  "title": "Warm Weather Apparel"
+ },
+ {
+  "handle": "welcome-back-spring-deals-up-to-40-off",
+  "title": "Welcome Back Spring. Deals up to 40% off"
+ },
+ {
+  "handle": "wind-resistant-tent-0afz01b",
+  "title": "Wind Resistant Tents"
+ },
+ {
+  "handle": "winter-apparel",
+  "title": "Winter Apparel"
+ },
+ {
+  "handle": "winter-clearance-sale",
+  "title": "Winter Clearance Sale - Ends Feb. 15th"
+ },
+ {
+  "handle": "winter-deals",
+  "title": "Winter Deals"
+ },
+ {
+  "handle": "winter-gifts",
+  "title": "Winter Gifts"
+ },
+ {
+  "handle": "winter-hiking-jacket-0afz11b",
+  "title": "Winter Hiking Jackets"
+ },
+ {
+  "handle": "winter-snow-jackets",
+  "title": "Winter Jackets"
+ },
+ {
+  "handle": "winter-pants",
+  "title": "Winter Pants & Bibs"
+ },
+ {
+  "handle": "winter-vests",
+  "title": "Winter Vests"
+ },
+ {
+  "handle": "womens",
+  "title": "Women's"
+ },
+ {
+  "handle": "womens-base-layers",
+  "title": "Women's Base Layers & Thermal Underwear"
+ },
+ {
+  "handle": "womens-bottoms",
+  "title": "Women's Bottoms"
+ },
+ {
+  "handle": "womens-cycling-clothing",
+  "title": "Women's Cycling Clothing"
+ },
+ {
+  "handle": "womens-deals",
+  "title": "Women's Deals"
+ },
+ {
+  "handle": "womens-down-jackets",
+  "title": "Women's Down Jackets & Coats"
+ },
+ {
+  "handle": "womens-fleeces-mid-layers",
+  "title": "Women's Fleece Jackets & Mid Layers"
+ },
+ {
+  "handle": "womens-footwear",
+  "title": "Women's Footwear"
+ },
+ {
+  "handle": "womens-gloves",
+  "title": "Women's Gloves"
+ },
+ {
+  "handle": "womens-hat-beanies",
+  "title": "Women's Hats & Beanies"
+ },
+ {
+  "handle": "hiking-womens-boots",
+  "title": "Women's Hiking Boots"
+ },
+ {
+  "handle": "womens-hiking-shoes",
+  "title": "Women's Hiking Shoes"
+ },
+ {
+  "handle": "womens-jackets",
+  "title": "Women's Jackets & Coats"
+ },
+ {
+  "handle": "womens-long-sleeved-t-shirts",
+  "title": "Women's Long-Sleeved Shirts"
+ },
+ {
+  "handle": "womens-merino-wool",
+  "title": "Women's Merino Wool Clothes"
+ },
+ {
+  "handle": "womens-pants-leggings",
+  "title": "Women's Pants & Leggings"
+ },
+ {
+  "handle": "womens-synthetic-padded-jackets-vests",
+  "title": "Women's Puffer Jackets & Vests"
+ },
+ {
+  "handle": "womens-rain-snow-jacket",
+  "title": "Women's Rain Jackets & Raincoats"
+ },
+ {
+  "handle": "womens-sandals",
+  "title": "Women's Sandals"
+ },
+ {
+  "handle": "womens-shirts-1",
+  "title": "Women's Shirts"
+ },
+ {
+  "handle": "womens-shorts-skirts",
+  "title": "Women's Shorts & Skirts"
+ },
+ {
+  "handle": "womens-socks",
+  "title": "Women's Socks"
+ },
+ {
+  "handle": "womens-sport-bras",
+  "title": "Women's Sport Bras"
+ },
+ {
+  "handle": "womens-shirts",
+  "title": "Women's T-Shirts"
+ },
+ {
+  "handle": "womens-tops",
+  "title": "Women's Tops"
+ },
+ {
+  "handle": "womens-windbreaker-jackets",
+  "title": "Women's Windbreaker Jackets"
+ },
+ {
+  "handle": "womens-winter-jackets",
+  "title": "Women's Winter Jackets"
+ }
+]

@@ -1,0 +1,8 @@
+reflex==0.9.7
+google-genai==2.14.0
+httpx
+pydantic>=2
+logfire[httpx]
+python-dotenv
+pytest
+pytest-asyncio

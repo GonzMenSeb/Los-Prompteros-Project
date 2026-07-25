@@ -1,0 +1,72 @@
+{
+ "id": "gid://shopify/Cart/hWNEtCGxK35APFwWQW7N4eaw?key=7d7ca74824e7ca47133313aee88872bf",
+ "line_items": [
+  {
+   "id": "gid://shopify/CartLine/1a4ffcf0-6447-4552-b559-3e6984513b58?cart=hWNEtCGxK35APFwWQW7N4eaw",
+   "item": {
+    "id": "gid://shopify/ProductVariant/41919445434430",
+    "title": "Quechua Men's NH500 Warm Waterproof High Leather Hiking Boots - Dark Cinnamon / 6.5",
+    "price": 10000,
+    "image_url": "https://cdn.shopify.com/s/files/1/1330/6287/files/8641979-product_image-p2579575.jpg?v=1755289865"
+   },
+   "quantity": 1,
+   "totals": [
+    {
+     "type": "subtotal",
+     "amount": 10000,
+     "display_text": "Subtotal"
+    },
+    {
+     "type": "total",
+     "amount": 10000,
+     "display_text": "Total"
+    }
+   ]
+  }
+ ],
+ "currency": "USD",
+ "discounts": {
+  "codes": [],
+  "applied": []
+ },
+ "totals": [
+  {
+   "type": "subtotal",
+   "amount": 10000,
+   "display_text": "Subtotal"
+  },
+  {
+   "type": "total",
+   "amount": 10000,
+   "display_text": "Total"
+  }
+ ],
+ "fulfillment": {
+  "methods": []
+ },
+ "expires_at": "2026-08-24T14:34:37Z",
+ "links": [
+  {
+   "type": "refund_policy",
+   "title": "Refund Policy",
+   "url": "https://checkout.shopify.com/13306287/policies/24813441.html?locale=en"
+  },
+  {
+   "type": "privacy_policy",
+   "title": "Privacy Policy",
+   "url": "https://checkout.shopify.com/13306287/policies/24813505.html?locale=en"
+  },
+  {
+   "type": "terms_of_service",
+   "title": "Terms of Service",
+   "url": "https://checkout.shopify.com/13306287/policies/24813569.html?locale=en"
+  },
+  {
+   "type": "shipping_policy",
+   "title": "Shipping Policy",
+   "url": "https://checkout.shopify.com/13306287/policies/13562019902.html?locale=en"
+  }
+ ],
+ "messages": [],
+ "continue_url": "https://decathlon-usa.myshopify.com/cart/c/hWNEtCGxK35APFwWQW7N4eaw?key=7d7ca74824e7ca47133313aee88872bf"
+}

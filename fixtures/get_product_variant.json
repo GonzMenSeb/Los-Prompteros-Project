@@ -1,0 +1,260 @@
+{
+ "product": {
+  "id": "gid://shopify/Product/7839703466046",
+  "title": "Quechua Men's NH500 Warm Waterproof High Leather Hiking Boots",
+  "description": {
+   "html": "This warm winter boot features a high leather upper and a waterproof membrane, making it perfect for icy pathways and snowy trails\u2014keeping your feet dry and secure no matter the conditions."
+  },
+  "url": "https://www.decathlon.com/products/quechua-mens-warm-and-waterproof-leather-hiking-boots-sh500-high-332020-fw25",
+  "handle": "quechua-mens-warm-and-waterproof-leather-hiking-boots-sh500-high-332020-fw25",
+  "price_range": {
+   "min": {
+    "amount": 10000,
+    "currency": "USD"
+   },
+   "max": {
+    "amount": 10000,
+    "currency": "USD"
+   }
+  },
+  "list_price_range": {
+   "min": {
+    "amount": 14900,
+    "currency": "USD"
+   },
+   "max": {
+    "amount": 14900,
+    "currency": "USD"
+   }
+  },
+  "variants": [
+   {
+    "id": "gid://shopify/ProductVariant/41919445434430",
+    "sku": "4272771",
+    "title": "Dark Cinnamon / 6.5",
+    "description": {
+     "html": "This warm winter boot features a high leather upper and a waterproof membrane, making it perfect for icy pathways and snowy trails\u2014keeping your feet dry and secure no matter the conditions."
+    },
+    "price": {
+     "amount": 10000,
+     "currency": "USD"
+    },
+    "list_price": {
+     "amount": 14900,
+     "currency": "USD"
+    },
+    "availability": {
+     "available": true
+    },
+    "options": [
+     {
+      "name": "Color",
+      "label": "Dark Cinnamon"
+     },
+     {
+      "name": "Size",
+      "label": "6.5"
+     }
+    ],
+    "media": [
+     {
+      "type": "image",
+      "url": "https://cdn.shopify.com/s/files/1/1330/6287/files/8641979-product_image-p2579575.jpg?v=1755289865",
+      "alt_text": "{*dark-cinnamon-8641979*}"
+     }
+    ],
+    "requires": {
+     "shipping": true,
+     "selling_plan": false
+    },
+    "checkout_url": "https://decathlon-usa.myshopify.com/cart/41919445434430:1"
+   }
+  ],
+  "options": [
+   {
+    "name": "Color",
+    "values": [
+     {
+      "label": "Dark Cinnamon",
+      "available": true,
+      "exists": true
+     }
+    ]
+   },
+   {
+    "name": "Size",
+    "values": [
+     {
+      "label": "6.5",
+      "available": true,
+      "exists": true
+     },
+     {
+      "label": "7.5",
+      "available": true,
+      "exists": true
+     },
+     {
+      "label": "8",
+      "available": true,
+      "exists": true
+     },
+     {
+      "label": "9",
+      "available": true,
+      "exists": true
+     },
+     {
+      "label": "9.5",
+      "available": true,
+      "exists": true
+     },
+     {
+      "label": "10.5",
+      "available": true,
+      "exists": true
+     },
+     {
+      "label": "11.5",
+      "available": true,
+      "exists": true
+     },
+     {
+      "label": "12",
+      "available": true,
+      "exists": true
+     },
+     {
+      "label": "13",
+      "available": true,
+      "exists": true
+     }
+    ]
+   }
+  ],
+  "media": [
+   {
+    "type": "image",
+    "url": "https://cdn.shopify.com/s/files/1/1330/6287/files/8641979-product_image-p2579575.jpg?v=1755289865"
+   }
+  ],
+  "categories": [
+   {
+    "value": "gid://shopify/TaxonomyCategory/na",
+    "taxonomy": "shopify"
+   }
+  ],
+  "selected": [
+   {
+    "name": "Color",
+    "label": "Dark Cinnamon"
+   },
+   {
+    "name": "Size",
+    "label": "6.5"
+   }
+  ],
+  "gift_card": false,
+  "collections": [
+   {
+    "id": "gid://shopify/Collection/431780301",
+    "handle": "mens-hiking-boots",
+    "title": "Men's Hiking Boots",
+    "description": {
+     "html": "Men's Hiking Boots Conquer the Trail: Men's Hiking Boots by Decathlon When you're ready to take on the most challenging trails, you need footwear that's built for the job. At Decathlon, our men's hiking boots are designed to provide the rugged durability, superior support, and unmatched comfort you need to conquer any terrain. Whether you're a seasoned backpacker or a weekend warrior, our collection offers the perfect pair to help you explore the outdoors with confidence. Our Collection: Built for Performance Our range of men's hiking boots is engineered to suit every type of hiker and adventure. Mid-cut Hiking Boots: Our most versatile and popular option. Mid-cut boots offer an ideal balance of ankle support and freedom of movement, making them perfect for day hikes and weekend trips. Our waterproof hiking boots are a must-have for unpredictable weather conditions, keeping your feet dry and comfortable. High-cut and Backpacking Boots: For long-distance trekking and carrying a heavy pack, a higher boot provides the best ankle support and stability. Our backpacking boots are built to handle tough mountain terrain and multi-day trips, offering the protection and durability you need for a safe and comfortable experience. For those quick trips and fast-paced trails, our low-cut hiking shoes deliver the lightweight performance you need. Essential Features for the Trail We pack our men's hiking boots with features to enhance your performance and comfort on the trail. Superior Grip: We use high-quality outsoles with strategic lug patterns to ensure excellent traction and prevent slipping on various surfaces. Our proprietary SNOWCONTACT technology is perfect for winter conditions, while advanced rubber compounds on select models provide a reliable grip on wet or rocky ground. Weather Protection: Many of our models feature a breathable, waterproof membrane that keeps your feet dry while allowing moisture to escape. This is a game-changer for walking through streams or on rainy days. Comfort and Fit: A comfortable fit is key to a good hike. Our boots feature cushioned midsoles to absorb impact and reduce foot fatigue. Reinforced toe boxes provide extra protection, while different lacing systems allow for a customized, secure fit. We also offer options for a wide foot, so you can find a pair that feels just right. Quality You Can Trust Every pair of Quechua hiking boots is rigorously tested in our Decathlon Sportslab to ensure they meet the highest standards of quality and durability. We conduct extensive lab tests on materials, seams, and eyelets to guarantee our boots can withstand the demands of the trail. Don't let anything hold you back. Explore our collection today and find the perfect pair to take on your next adventure."
+    },
+    "url": "https://www.decathlon.com/collections/mens-hiking-boots"
+   },
+   {
+    "id": "gid://shopify/Collection/77646004335",
+    "handle": "mens",
+    "title": "Men's",
+    "description": {
+     "html": "About Our Men's Collection Want to take up a new sport or get in shape but don\u2019t know where to start? Whether you\u2019re just looking to try something different or you\u2019re a seasoned athlete on the hunt for new gear, Decathlon has got you covered! We have a wide range of jackets, including our down puffer jackets that are made with humanely-sourced duck feathers and are designed to withstand the wind and the cold while also staying lightweight. Trekking into some heavy showers? Get into one of our breathable, waterproof, and well ventilated rain jackets. We also engineer windbreakers to help you stay protected and keep moving while in strong winds with unpredictable conditions. If you want something soft while you\u2019re out in the city, countryside, or mountaintops, our zippered fleeces were made for you. They are lightweight, flexible, and breathe with you on all your journeys. Tops We have tops designed for your favorite sport! Our sweatshirts and hoodies keep you cozy both indoors and outdoors. All of our sweatshirts and hoodies are designed to be comfortable and anatomically flexible, moving with your body no matter what kind of exercise you engage in. We have a wide variety of shirts for your every athletic need, from hiking to hunting to running and more! Both short sleeve and long sleeve (and even sleeveless)! Looking for even more freedom of movement and breathability? We have the tank that\u2019s perfect for you! Pants We have athletic pants that flow with you no matter your movement. Our pants come with a variety of different features and technology, adapted perfectly for each type of sport. Our running pants feature moisture wicking technology and quick-dry fabric so you can stay on the move. Our Quechua hiking pants ensure flexible movement so you don\u2019t feel constrained in the wilderness. Domyos, our gym and yoga brand, designs moisture wicking, flexible, and breathable pants for while you\u2019re active at the gym or yoga studio. It doesn\u2019t stop there. We have pants for all kinds of sports, including tennis and team sports. We also engineer tights that are great for cardio, weightlifting, tennis, and more. The pockets keep your things secure while you move about. Our shorts offer more freedom with all the same kind of high-tech features. Shoes If you\u2019re out moving, you\u2019re going to need the right shoes. Decathlon\u2019s Kalenji brand is here to get you started on your journey and reach your goals. Our running shoes are designed for roads, tracks, and trail and provide the most comfort while maintaining optimal energy transfer so you can sustain your stride. Our K-Ring technology improves cushioning at the rear and attenuates shock waves. Quechua also has an extensive line of footwear to make your excursion in the outdoors safe, fun, and fulfilling without sacrificing any comfort\u2013even in the snow! Our Artengo brand has your every tennis need. We also engineer tennis shoes that are comfortable while durable, maintaining a cushioning but stable sole so you can fly about the court. Nabaiji Starting to take lessons at the pool? Whether you\u2019re taking your first swim class, going diving at the local lake, or practicing for your next swimming competition, Nabaiji, Decathlon\u2019s swimming brand, is with you every step of the way. Our one piece swim trunks and swim boxers provide stability and support while you move in the water. Anatomically designed, our swimwear adapts to different body shapes so you\u2019ll always feel comfortable. Our boardshorts are engineered to dry quickly after you\u2019re done in the water and they won\u2019t constrain your movement in the waves. Our wetsuits are perfectly equipped to accompany you in both cold waters and warm waters alike. Don\u2019t forget your rash guard to protect you from harmful rays, even when wet! Accessories Find the right accessories for your favorite sport. Bags, hats, and more! We have it all!. Decathlon also designs the perfect underwear (including thermal base layers) to wick away moisture and keep you warm and protected on your adventures in the sun or snow, whatever your favorite activity! If you\u2019re looking for some good deals, we can find our lowest prices with discounts up to 80% off in our sales section!"
+    },
+    "url": "https://www.decathlon.com/collections/mens"
+   },
+   {
+    "id": "gid://shopify/Collection/77954842735",
+    "handle": "mens-footwear",
+    "title": "Men's Footwear",
+    "description": {
+     "html": ""
+    },
+    "url": "https://www.decathlon.com/collections/mens-footwear"
+   },
+   {
+    "id": "gid://shopify/Collection/158051139646",
+    "handle": "camp-hike",
+    "title": "Hiking & Backpacking",
+    "description": {
+     "html": "About Our Hiking & Backpacking Collection At Decathlon, we have 2 in-house brands focused exclusively on creating the best hiking & camping gear at the best prices: Quechua and Forclaz. Quechua Quechua is our in-house hiking & camping brand, with a design center in Mont-Blanc, France that researches and develops eco-friendly and innovative products, such as the \u201c2 Seconds\u201d pop up tent. In addition to camping tents, the Quechua brand has everything you need to set up camp. Quechua carries a full range of cookware, including camping stoves, to make preparing a meal easy. Camp furniture, including camping chairs and tables, bring the comforts of home to the great outdoors. Quechua also has a line of solar powered accessories such as camping showers and lanterns. When it comes to what you wear on your next camping trip, Quechua has you covered with a full range of hiking clothing and footwear, including hiking boots, shoes, backpacks, pants, and more. Forclaz Forclaz is our in-house backpacking brand, focused primarily on apparel and hiking accessories. Forclaz provides all of the gear for everything from a quick hike on your favorite trail, to longer excursions. Forclaz creates hiking poles, headlamps, gloves, hats, and even has a range of merino wool hiking clothing. The most popular of the Forclaz products is the Trek 100 Down Puffer Backpacking Jacket, which comes in men\u2019s and women\u2019s sizes. See what Backpacker.com has to say about it. Both Forclaz and Quechua cater to the whole family, with gear for men, women, and kids! Whether you\u2019re camping with friends and family, preparing for a backpacking trip, or enjoying vanlife, Decathlon has you covered."
+    },
+    "url": "https://www.decathlon.com/collections/camp-hike",
+    "media": {
+     "type": "image",
+     "url": "https://cdn.shopify.com/s/files/1/1330/6287/collections/Collections-Herobanner-Camp-_-hike.jpg?v=1759928429"
+    }
+   },
+   {
+    "id": "gid://shopify/Collection/158090919998",
+    "handle": "footwear",
+    "title": "Footwear",
+    "description": {
+     "html": ""
+    },
+    "url": "https://www.decathlon.com/collections/footwear"
+   },
+   {
+    "id": "gid://shopify/Collection/262993379390",
+    "handle": "quechua",
+    "title": "Quechua",
+    "description": {
+     "html": ""
+    },
+    "url": "https://www.decathlon.com/collections/quechua"
+   },
+   {
+    "id": "gid://shopify/Collection/265961832510",
+    "handle": "deals",
+    "title": "Deals",
+    "description": {
+     "html": ""
+    },
+    "url": "https://www.decathlon.com/collections/deals"
+   },
+   {
+    "id": "gid://shopify/Collection/270289829950",
+    "handle": "hike-camp-shoes",
+    "title": "Hiking Shoes",
+    "description": {
+     "html": "Hiking Shoes Gear Up for Adventure: Hiking Shoes by Quechua Your next outdoor adventure starts with the right footwear. At Decathlon, we believe that the right pair of hiking shoes should provide comfort, support, and durability, no matter the terrain. Our collection of hiking shoes is designed to meet the diverse needs of every hiker, from a casual walk in the park to a challenging mountain trek. With a wide range of styles and features, we have the perfect pair to help you explore the outdoors with confidence. Choose Your Style: Low-cut vs. Mid-cut Finding the right footwear is crucial, and we offer a variety to suit your needs. Low-cut Hiking Shoes: These are a great choice for quick day hikes and well-maintained trails. They are lightweight, flexible, and offer more breathability than traditional hiking boots. Low-cut shoes provide excellent traction and are a perfect choice for those who prefer an athletic feel. Mid-cut Hiking Shoes: Our most popular and versatile option. Mid-cut shoes offer an ideal balance of ankle support and freedom of movement. They are the go-to footwear for everything from short walks to more challenging treks. Our waterproof hiking shoes are an essential piece of gear for anyone who wants to be prepared for changing weather conditions. Key Features to Look For We pack our hiking shoes with essential features to enhance your time on the trail. Waterproof Protection: Many of our models feature a breathable, waterproof membrane that keeps your feet dry while still allowing moisture to escape. This is a crucial feature for wet terrain, streams, and rainy days. Exceptional Grip and Traction: Our outsoles are designed with strategic stud patterns to provide excellent grip and prevent slipping on smooth surfaces or in challenging conditions. The traction ensures forward propulsion and stability on inclines. Fit and Comfort: We know that a comfortable fit is everything. Our collection includes options for a wide foot and different lacing systems for a customized feel. We incorporate cushioned midsoles and reinforced toe boxes to protect your foot and reduce fatigue, so you can walk for a long time without discomfort. Our shoes are designed to provide both comfort and lasting durability. There are key differences between men's and women's hiking shoes, though both serve the same purpose. Women's models are typically built on a narrower last, with a focus on a snugger fit in the heel and a softer midsole to account for a lower average body weight. Men's shoes are generally wider and feature a more rigid, supportive midsole for greater impact. Ultimately, the best hiking shoe is the one that fits your foot shape perfectly, regardless of whether it's labeled for a man or a woman. Our Commitment to Quality Every pair of hiking shoes we sell is put through rigorous testing in our Decathlon Sportslab to ensure they can withstand regular use. Our engineers perform lab tests on eyelets, seams, and materials to guarantee the highest standards of abrasion resistance and overall durability. Don't let anything hold you back; shop our collection today and see the Decathlon difference for yourself."
+    },
+    "url": "https://www.decathlon.com/collections/hike-camp-shoes"
+   },
+   {
+    "id": "gid://shopify/Collection/270290092094",
+    "handle": "hiking-boots",
+    "title": "Hiking Boots",
+    "description": {
+     "html": "Hiking Boots Built for the Trail: Hiking Boots by Decathlon For serious trekkers and multi-day adventures, nothing beats the stability and protection of a good pair of hiking boots. At Decathlon, we've engineered our hiking boots to provide the rugged durability and superior support you need to tackle challenging terrain. Our collection is designed for everyone, from casual hikers to seasoned backpackers, ensuring you have the right gear to explore the outdoors with confidence. Our Range: From Mid-cut to Backpacking Boots Finding the right footwear is crucial, and we offer a variety to suit your needs. Mid Hiking Boots: Our most popular choice for all-around use, mid-cut hiking boots offer the ideal balance of ankle support and freedom of movement. This style is incredibly versatile, making it the go-to shoe for everything from short walks to more challenging treks. Our waterproof hiking boots are an essential piece of gear for anyone who wants to be prepared for changing weather conditions. High-cut and Backpacking Boots: For long excursions and carrying a heavy pack, a higher boot provides superior ankle support and durability. Our backpacking boots are built to withstand the rigors of multi-day trips and tough mountain terrain. They offer the stability and protection you need for a safe and comfortable experience. Men's and women's hiking boots have key differences in their design. Women's boots are typically narrower in the heel and lighter overall, with a slightly softer midsole. Men's boots are generally wider and more rigid to handle greater weight and impact. Regardless of gender, the most important factor is finding a boot that fits your individual foot perfectly for comfort and support. Looking for a lightweight shoe for day hikes or trail running? Our low-cut hiking shoes are the perfect option. Key Features to Look For We've packed our hiking boots with essential features to enhance your time on the trail. Waterproof Protection: Our waterproof hiking boots are a game-changer. Many of our models feature a breathable, waterproof membrane, which ensures your feet stay dry while still allowing moisture to escape. Exceptional Grip and Traction: We use high-quality outsoles with strategic stud patterns to provide excellent grip and prevent slipping on smooth surfaces or in challenging conditions. The traction ensures forward propulsion and stability on inclines. Our proprietary SNOWCONTACT technology for winter boots and advanced rubber compounds like Vibram on select models are designed for optimal performance. Fit and Comfort: A comfortable fit is everything. Our collection includes options for a wide foot and different lacing systems for a customized feel. We incorporate cushioned midsoles and reinforced toe boxes to protect your foot and reduce fatigue, so you can walk for a long time without discomfort. Our Commitment to Quality As Decathlon, we stand by the quality of our products. Every pair of hiking boots we sell is put through rigorous testing in our Decathlon Sportslab to ensure they can withstand regular use. Our engineers perform lab tests on eyelets, seams, and materials to guarantee the highest standards of abrasion resistance and overall durability. Don't let anything hold you back; shop our collection today and see the Decathlon difference for yourself."
+    },
+    "url": "https://www.decathlon.com/collections/hiking-boots"
+   },
+   {
+    "id": "gid://shopify/Collection/288630865982",
+    "handle": "shop-all",
+    "title": "Shop All",
+    "description": {
+     "html": ""
+    },
+    "url": "https://www.decathlon.com/collections/shop-all",
+    "media": {
+     "type": "image",
+     "url": "https://cdn.shopify.com/s/files/1/1330/6287/collections/24-Decathlon-logo-512x512_1.jpg?v=1750895923"
+    }
+   }
+  ]
+ },
+ "messages": []
+}
