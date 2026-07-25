@@ -181,3 +181,18 @@ Copyright line is **Los Prompteros**, matching the README credit.
 Not done, and required if a modified fork is ever deployed publicly: AGPL §13 obliges
 the running UI to offer its users the Corresponding Source. Today's UI carries no such
 link, which is fine for the original — we publish the source — but a fork must add one.
+
+### 2026-07-25 · MIT after all, superseding the AGPL entry above
+
+Sebastián's call: MIT. The AGPL reasoning in the previous entry still describes the
+trade-off accurately, but it was solving a problem this project does not have. DecaBot
+is a hackathon deliverable, not a product with a competitor worth fencing out, and the
+cost of AGPL is real — plenty of companies refuse to touch AGPL code, which makes the
+repo less useful as something to show people.
+
+`LICENSE` is the SPDX MIT text with the copyright line filled in as Los Prompteros;
+verified identical to the canonical copy apart from that line. The AGPL §13 note in the
+previous entry no longer applies: MIT asks nothing of anyone who deploys a fork.
+
+Leaving the AGPL entry above in place rather than deleting it, per the append-only rule.
+A later reader should be able to see that AGPL was considered and why it was dropped.
