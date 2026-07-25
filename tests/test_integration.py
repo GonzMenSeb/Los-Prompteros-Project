@@ -302,6 +302,69 @@ class TestQueryShapeAgreement:
         assert not any(ch.isdigit() for ch in out)
 
 
+class TestPublicLoadPriority:
+    """A QR code can point a room full of phones at the same tunnel the demo runs on.
+    The presenting laptop must never queue behind them, and a crowd of confirms must
+    not trip the MCP limiter — that costs ~48 minutes for everybody, us included."""
+
+    def test_priority_is_off_unless_a_token_is_configured(self):
+        """Failing open is the safe direction: a misconfigured token must never be able
+        to put the demo laptop in a queue behind the public."""
+        import inspect
+
+        state = _mod("concierge.state")
+        assert state.PUBLIC_SLOTS >= 1
+        # Reflex wraps handlers in EventHandler; the python function is on `.fn`.
+        handler = state.State.send_message
+        src = inspect.getsource(getattr(handler, "fn", handler))
+        assert "bool(VIP_TOKEN) and not self.is_vip" in src, (
+            "the queue must be gated on a configured token AND non-vip, or an unset\n"
+            "  CONCIERGE_VIP_TOKEN would make the presenting laptop wait its turn"
+        )
+
+    def test_state_loads_dotenv_before_reading_its_env(self):
+        """state.py reads CONCIERGE_VIP_TOKEN at import time, and agent/classify.py —
+        the other loader — is imported lazily inside the event handler. Without its own
+        load_dotenv, every constant silently takes its default: the VIP token read as ""
+        and the presenting laptop was served on the public key pool."""
+        import inspect
+
+        state = _mod("concierge.state")
+        src = inspect.getsource(state)
+        assert "load_dotenv(" in src, "state.py must load .env itself, not rely on another module"
+        assert src.index("load_dotenv(") < src.index('os.environ.get("CONCIERGE_VIP_TOKEN"'), (
+            "load_dotenv must run BEFORE the module-level env reads"
+        )
+
+    async def test_cart_creation_is_serialised_across_sessions(self, monkeypatch):
+        cart = _mod("concierge.commerce.cart")
+        from tests.conftest import item as make_item
+
+        overlap = 0
+        peak = 0
+
+        async def slow_call(tool, args):
+            nonlocal overlap, peak
+            overlap += 1
+            peak = max(peak, overlap)
+            try:
+                await asyncio.sleep(0.05)
+            finally:
+                overlap -= 1
+            return {
+                "id": "gid://shopify/Cart/1",
+                "continue_url": "https://decathlon-usa.myshopify.com/cart/c/x?key=y",
+                "line_items": [{"item": {"id": make_item().variant_id}, "quantity": 1}],
+                "totals": [{"type": "total", "amount": 10000}],
+                "currency": "USD",
+            }
+
+        monkeypatch.setattr(cart, "call_ucp", slow_call)
+        await asyncio.gather(*(cart.create_cart([make_item()]) for _ in range(5)))
+
+        assert peak == 1, f"{peak} create_cart calls were in flight at once; a burst re-trips the limiter"
+
+
 class TestRateLimitPacing:
     """A 429 costs ~48 minutes, so the response that matters is pacing, not waiting:
     mid-lockout a trickle is served and a burst of 3-4 re-trips it (AGENTS.md).
@@ -552,3 +615,56 @@ class TestDisclosureReachesTheUser:
         kit = Kit(items=[item(price_minor=10000)], budget_minor=9000)
         claims = find_unbacked_claims(loop._disclosures(kit), kit.items)
         assert {c.kind for c in claims} == {"price"}
+
+
+
+class TestReconnectDoesNotRestartTheWalkthrough:
+    """Reflex's compiled `initialEvents` sends on_load on every websocket connect AND
+    reconnect (reflex_base/compiler/templates.py: "The following events are sent when
+    the websocket connects or reconnects"). With `?walkthrough=<phase>` in the URL that
+    re-armed the whole script, and the in-progress guard (`is_thinking or
+    walkthrough_phase`) is open at exactly the wrong moment — the instant the script
+    finishes, when the kit and the cart button are on screen. A tunnel blip there ran
+    clear() and wiped both.
+    """
+
+    def test_on_page_load_is_latched_against_a_reconnect(self):
+        import inspect
+
+        state_mod = _mod("concierge.state")
+        handler = state_mod.State.on_page_load
+        src = inspect.getsource(getattr(handler, "fn", handler))
+
+        assert "walkthrough_autostarted" in src, (
+            "on_page_load must be gated on a once-per-session latch. Reflex re-fires\n"
+            "  on_load on every websocket RECONNECT, and without the latch a tunnel blip\n"
+            "  at the finish line restarts the script and clear()s the kit and the cart."
+        )
+        assert src.index("self.walkthrough_autostarted = True") < src.index("async for"), (
+            "the latch must be set BEFORE the first await, or a reconnect landing during\n"
+            "  the run re-enters this handler"
+        )
+
+    def test_the_latch_is_a_declared_state_var_defaulting_to_false(self):
+        state_mod = _mod("concierge.state")
+        field = state_mod.State.__annotations__.get("walkthrough_autostarted")
+        assert field is not None, "walkthrough_autostarted must be a declared state var"
+        assert state_mod.State(_reflex_internal_init=True).walkthrough_autostarted is False
+
+    def test_clear_does_not_release_the_autostart_latch(self):
+        """`Start over` gives a clean slate on purpose, but it must not re-arm the URL
+        trigger, or the next reconnect would start the script by itself."""
+        state_mod = _mod("concierge.state")
+        state = state_mod.State(_reflex_internal_init=True)
+        state.walkthrough_autostarted = True
+        state.clear()
+        assert state.walkthrough_autostarted is True
+
+    def test_clear_resets_the_two_step_cursor(self):
+        """The single demo button reads walkthrough_stage. A clean slate must send it
+        back to step 1, or the button would offer 'Go live' with no kit to probe."""
+        state_mod = _mod("concierge.state")
+        state = state_mod.State(_reflex_internal_init=True)
+        state.walkthrough_stage = 2
+        state.clear()
+        assert state.walkthrough_stage == 0

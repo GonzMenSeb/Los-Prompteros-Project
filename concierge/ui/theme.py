@@ -41,12 +41,39 @@ ACCENT_DIM = TINT_3
 GUARDRAIL = BRAND
 ON_BRAND = WHITE
 
+# A hairline inside an already-bordered surface. GREY_4 at that job reads as a
+# second frame; this sits just above the white.
+HAIRLINE = "#EDECEB"
+
 # Their brand faces are proprietary; Inter is the one they also load.
 FONT = "Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif"
-MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+# The audit rail is DecaBot's own instrument rather than storefront chrome, so it
+# gets a real mono instead of whatever the OS hands back.
+MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 
 RADIUS = "8px"
 RADIUS_SM = "4px"
+RADIUS_LG = "14px"
+RADIUS_PILL = "999px"
+
+# Shadows are cast in the brand's own hue, not neutral black — on a #F5F6FC page a
+# grey shadow reads as dirt.
+SHADOW_XS = "0 1px 2px rgba(39,47,118,0.05)"
+SHADOW_SM = "0 1px 2px rgba(39,47,118,0.05), 0 2px 6px rgba(39,47,118,0.05)"
+SHADOW_MD = "0 2px 4px rgba(39,47,118,0.05), 0 10px 24px rgba(39,47,118,0.07)"
+SHADOW_LG = "0 4px 10px rgba(39,47,118,0.07), 0 20px 46px rgba(39,47,118,0.11)"
+SHADOW_BRAND = "0 6px 18px rgba(54,67,186,0.26)"
+
+FOCUS_RING = "0 0 0 4px rgba(54,67,186,0.14)"
+
+TRACK_TIGHT = "-0.02em"
+TRACK_TIGHTER = "-0.03em"
+TRACK_EYEBROW = "0.14em"
+
+EASE = "cubic-bezier(0.22,0.61,0.36,1)"
+
+CONTENT_W = "1040px"
+RAIL_W = "384px"
 
 LEVEL_COLOR = {"info": GREY_1, "guardrail": BRAND, "error": DANGER}
 LEVEL_BG = {

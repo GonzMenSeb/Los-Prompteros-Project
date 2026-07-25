@@ -15,10 +15,20 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 import reflex as rx
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+
+# MUST run before the module-level env reads below. `agent/classify.py` also loads it,
+# but that module is imported lazily inside the event handler, so at the time this
+# module is imported nothing has read `.env` yet — every constant below would silently
+# take its default. That is how CONCIERGE_VIP_TOKEN read as "" and the presenting
+# laptop was served on the public key. Absolute path: a bare load_dotenv() resolves
+# relative to the caller and finds nothing when Reflex imports us.
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from concierge import walkthrough
 from concierge.domain.models import CartResult, KitItem, minor_to_display
@@ -31,6 +41,21 @@ FIXTURE_MODE = os.environ.get("CONCIERGE_FIXTURE_MODE", "0") not in ("0", "false
 
 _STEP_DELAY = 0.25
 _POLL_INTERVAL = 0.15
+
+# Public-load protection, for when a QR code points a room full of phones at the same
+# tunnel the demo is running on.
+#
+# The presenting laptop opens the app with `?vip=<CONCIERGE_VIP_TOKEN>` and never
+# queues. Everyone else shares CONCIERGE_PUBLIC_SLOTS concurrent turns and waits their
+# turn, which is what stops N phones from each holding a 60-second generator open and
+# burning the shared Gemini quota in parallel.
+#
+# OFF unless CONCIERGE_VIP_TOKEN is set. A misconfigured token must never be able to
+# put the demo laptop in a queue — failing open is the safe direction here.
+VIP_TOKEN = os.environ.get("CONCIERGE_VIP_TOKEN", "")
+PUBLIC_SLOTS = max(1, int(os.environ.get("CONCIERGE_PUBLIC_SLOTS", "3")))
+
+_public_gate = asyncio.Semaphore(PUBLIC_SLOTS)
 
 _SESSIONS: dict[str, Any] = {}
 
@@ -140,7 +165,19 @@ class State(rx.State):
     status: str = ""
     error: str = ""
 
+    is_vip: bool = False
+
     walkthrough_phase: str = ""
+    # How far the two-step script has got: 0 nothing run, 1 prewarmed, 2 finished.
+    # This is what the single demo button reads to know which phase is next.
+    walkthrough_stage: int = 0
+    # Reflex's `initialEvents` fires on_load on every websocket RECONNECT, not just the
+    # first load, so `?walkthrough=<phase>` would re-arm the script every time the tunnel
+    # blinked. The in-progress guard does not cover the moment the script FINISHES —
+    # which is when the kit and the cart button are on screen — so a reconnect there
+    # ran clear() and wiped both. Latched once per session and never released, not even
+    # by clear(): a reconnect must never be able to start the script by itself.
+    walkthrough_autostarted: bool = False
     walkthrough_step: int = 0
     walkthrough_total: int = 0
     walkthrough_label: str = ""
@@ -258,6 +295,13 @@ class State(rx.State):
         self.status = ""
         self.error = ""
         self.draft = ""
+        self.walkthrough_stage = 0
+
+    @rx.event
+    async def send_example(self, text: str):
+        """The empty-state example chips. Same handler a typed message takes."""
+        async for _ in self.send_message({"message": text}):
+            yield
 
     @rx.event
     async def send_message(self, form_data: dict[str, Any]):
@@ -286,12 +330,25 @@ class State(rx.State):
             self._drain(sink)
             yield
 
-            if FIXTURE_MODE:
-                async for _ in self._fixture_turn(sink):
-                    yield
-            else:
-                async for _ in self._live_turn(sink, text):
-                    yield
+            queued = bool(VIP_TOKEN) and not self.is_vip
+            if queued and _public_gate.locked():
+                self.status = "The concierge is busy with the live demo — you're next in line…"
+                emit("session.queued", {"slots": PUBLIC_SLOTS}, level="guardrail")
+                self._drain(sink)
+                yield
+
+            if queued:
+                await _public_gate.acquire()
+            try:
+                if FIXTURE_MODE:
+                    async for _ in self._fixture_turn(sink):
+                        yield
+                else:
+                    async for _ in self._live_turn(sink, text):
+                        yield
+            finally:
+                if queued:
+                    _public_gate.release()
         except Exception as exc:
             emit("turn.error", {"error": repr(exc)}, level="error")
             self._drain(sink)
@@ -330,7 +387,7 @@ class State(rx.State):
     async def _live_turn(self, sink: list[TraceEvent], text: str):
         # Imported inside the handler: the agent lane owns this module and it must
         # not be a module-scope import while the lanes build concurrently.
-        from concierge.agent import tools
+        from concierge.agent import classify, tools
         from concierge.agent.loop import run_turn
         from concierge.commerce import catalog
 
@@ -343,6 +400,16 @@ class State(rx.State):
         # between turns, so it must outlive a single handler. Reflex state cannot
         # hold a dataclass, hence the module-level map keyed per browser session.
         session = _session_for(self.router.session.client_token)
+
+        # Which Gemini key this turn spends. The demo laptop keeps GEMINI_API_KEY to
+        # itself; a QR-code audience round-robins GEMINI_PUBLIC_KEYS. Per-project quota
+        # is the one bottleneck in-app queueing cannot protect, so separate keys are the
+        # only real isolation. Bound BEFORE create_task — contextvars are copied at
+        # task-creation time, exactly like bind_sink above.
+        classify.bind_key(None if self.is_vip else classify.next_public_key())
+        # Lane only. The trace panel is on screen for anyone holding the QR code, so no
+        # key material — not even a prefix — is ever emitted.
+        emit("model.key_lane", {"lane": "reserved" if self.is_vip else "public"})
 
         task = asyncio.create_task(run_turn(text, session))
         while not task.done():
@@ -433,13 +500,30 @@ class State(rx.State):
         `/` must never restart the script, or a stray refresh mid-pitch would wipe a
         kit that took three minutes of live calls to build.
 
+        Gated a second time on `walkthrough_autostarted`, because this handler runs again
+        on every websocket reconnect — see that field.
+
         `router.url.query_parameters` — `router.page` is deprecated in 0.9.x and slated
         for removal in 1.0.
         """
-        phase = self.router.url.query_parameters.get("walkthrough", "").strip().lower()
-        if phase in ("prewarm", "onstage", "all"):
+        params = self.router.url.query_parameters
+        if VIP_TOKEN and params.get("vip", "") == VIP_TOKEN:
+            self.is_vip = True
+            emit("session.priority", {"vip": True}, level="guardrail")
+
+        phase = params.get("walkthrough", "").strip().lower()
+        if phase in ("prewarm", "onstage", "all") and not self.walkthrough_autostarted:
+            # Latched BEFORE the first await, or a reconnect during the run re-enters here.
+            self.walkthrough_autostarted = True
             async for _ in self.run_walkthrough("" if phase == "all" else phase):
                 yield
+
+    @rx.event
+    async def advance_walkthrough(self):
+        """The one demo button. Which phase runs is derived from the cursor, not from
+        the click, so the UI cannot get out of step with the script."""
+        async for _ in self.run_walkthrough("onstage" if self.walkthrough_stage == 1 else "prewarm"):
+            yield
 
     @rx.event
     async def run_walkthrough(self, phase: str = ""):
@@ -484,6 +568,7 @@ class State(rx.State):
                         "never built. Run the prewarm phase first, or check the trace panel."
                     )
                 yield
+            self.walkthrough_stage = 1 if phase == "prewarm" else 2
         finally:
             self.walkthrough_phase = ""
             self.walkthrough_step = 0

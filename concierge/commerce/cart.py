@@ -6,11 +6,19 @@ Line shape is `line_items[].item.id` — not `merchandise_id`, not a bare id
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from concierge.commerce.ucp import CONTEXT, call_ucp
 from concierge.domain.models import CartResult, KitItem
 from concierge.obs.trace import emit
+
+# A crowd hitting "Build my cart" at the same moment is the one remaining way to trip
+# the MCP limiter, and a trip costs ~48 minutes — including for the demo laptop, since
+# the limit is per-endpoint and not per-user. Feed-first resolution took every other
+# MCP call out of a run, so serialising this one is enough: measured, a trickle is
+# served normally and only a burst re-trips it (AGENTS.md § Rate limits).
+_CART_GATE = asyncio.Semaphore(1)
 
 
 def cart_line(variant_gid: str, quantity: int = 1) -> dict[str, Any]:
@@ -29,7 +37,10 @@ async def create_cart(items: list[KitItem]) -> CartResult:
         raise ValueError("create_cart called with no items")
 
     lines = [cart_line(i.variant_id, i.quantity) for i in items]
-    cart = await call_ucp("create_cart", {"cart": {"line_items": lines, "context": CONTEXT}})
+    if _CART_GATE.locked():
+        emit("cart.queued", {"lines": len(lines)})
+    async with _CART_GATE:
+        cart = await call_ucp("create_cart", {"cart": {"line_items": lines, "context": CONTEXT}})
 
     returned = {(li.get("item") or {}).get("id") for li in cart.get("line_items") or []}
     missing = [i.variant_id for i in items if i.variant_id not in returned]

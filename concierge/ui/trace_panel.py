@@ -1,5 +1,5 @@
-"""The trace panel. A judge reads this while the agent works, so every step the
-loop takes has to arrive here live and guardrail verdicts have to be unmissable.
+"""The audit rail. A judge reads this while DecaBot works, so every step the loop
+takes has to arrive here live and guardrail verdicts have to be unmissable.
 """
 
 from __future__ import annotations
@@ -15,14 +15,18 @@ from concierge.ui.theme import (  # noqa: F401
     BRAND,
     BRAND_DARK,
     BRAND_DEEP,
+    CONTENT_W,
     DANGER,
     DANGER_BG,
+    EASE,
+    FOCUS_RING,
     FONT,
     GREY_1,
     GREY_2,
     GREY_3,
     GREY_4,
     GUARDRAIL,
+    HAIRLINE,
     INK,
     LEVEL_BG,
     LEVEL_COLOR,
@@ -33,13 +37,24 @@ from concierge.ui.theme import (  # noqa: F401
     PANEL,
     PANEL_2,
     RADIUS,
+    RADIUS_LG,
+    RADIUS_PILL,
     RADIUS_SM,
+    RAIL_W,
+    SHADOW_BRAND,
+    SHADOW_LG,
+    SHADOW_MD,
+    SHADOW_SM,
+    SHADOW_XS,
     SUCCESS,
     SUCCESS_BG,
     TEXT,
     TINT_1,
     TINT_2,
     TINT_3,
+    TRACK_EYEBROW,
+    TRACK_TIGHT,
+    TRACK_TIGHTER,
     WARN,
     WARN_BG,
     WHITE,
@@ -63,7 +78,7 @@ def _level_border(row: TraceRow):
         row.level,
         ("guardrail", LEVEL_COLOR["guardrail"]),
         ("error", LEVEL_COLOR["error"]),
-        BORDER,
+        GREY_4,
     )
 
 
@@ -76,59 +91,84 @@ def _level_bg(row: TraceRow):
     )
 
 
+def _level_icon(row: TraceRow):
+    return rx.match(row.level, ("error", "circle-alert"), "shield-check")
+
+
 def trace_row(row: TraceRow) -> rx.Component:
     color = _level_color(row)
-    return rx.vstack(
-        rx.hstack(
-            rx.text(
-                row.seq,
-                size="1",
-                color=MUTED,
-                font_family=MONO,
-                min_width="2.2rem",
+    return rx.hstack(
+        rx.text(
+            row.seq,
+            size="1",
+            color=GREY_2,
+            font_family=MONO,
+            width="1.5rem",
+            flex_shrink="0",
+            text_align="right",
+            line_height="1.5",
+        ),
+        rx.vstack(
+            rx.hstack(
+                rx.cond(
+                    row.level != "info",
+                    rx.icon(_level_icon(row), size=13, color=color, flex_shrink="0"),
+                ),
+                rx.text(
+                    row.event,
+                    size="2",
+                    weight="bold",
+                    color=color,
+                    font_family=MONO,
+                    letter_spacing="-0.01em",
+                    min_width="0",
+                    word_break="break-word",
+                ),
+                rx.spacer(),
+                rx.cond(
+                    row.level != "info",
+                    rx.text(
+                        row.level.upper(),
+                        size="1",
+                        weight="bold",
+                        color=ON_BRAND,
+                        font_family=MONO,
+                        letter_spacing="0.08em",
+                        background=color,
+                        padding="0.05rem 0.4rem",
+                        border_radius=RADIUS_PILL,
+                        flex_shrink="0",
+                    ),
+                ),
+                width="100%",
+                align="center",
+                spacing="2",
             ),
-            rx.text(
-                row.event,
-                size="2",
-                weight="bold",
-                color=color,
-                font_family=MONO,
-            ),
-            rx.spacer(),
             rx.cond(
-                row.level != "info",
-                rx.badge(
-                    row.level.upper(),
-                    variant="solid",
+                row.summary != "",
+                rx.text(
+                    row.summary,
                     size="1",
-                    background=_level_color(row),
-                    color=ON_BRAND,
+                    color=MUTED,
+                    font_family=MONO,
+                    white_space="pre-wrap",
+                    word_break="break-word",
+                    line_height="1.55",
                 ),
             ),
+            spacing="1",
+            align="start",
             width="100%",
-            align="center",
-            spacing="2",
+            min_width="0",
         ),
-        rx.cond(
-            row.summary != "",
-            rx.text(
-                row.summary,
-                size="1",
-                color=MUTED,
-                font_family=MONO,
-                white_space="pre-wrap",
-                word_break="break-word",
-                line_height="1.5",
-                padding_left="2.2rem",
-            ),
-        ),
-        spacing="1",
+        spacing="2",
         align="start",
         width="100%",
-        padding="0.55rem 0.7rem",
+        padding="0.5rem 0.6rem",
         background=_level_bg(row),
-        border_left=f"3px solid {_level_border(row)}",
+        border_left=f"2px solid {_level_border(row)}",
         border_radius=f"0 {RADIUS_SM} {RADIUS_SM} 0",
+        class_name="db-rise",
     )
 
 
@@ -141,43 +181,56 @@ def trace_body() -> rx.Component:
             width="100%",
             align="start",
         ),
-        rx.text(
-            "No steps yet. Send a message and every planning step, tool call, "
-            "grounding result and guardrail verdict lands here as it happens.",
-            size="2",
-            color=MUTED,
-            line_height="1.6",
-            padding="0.7rem",
+        rx.vstack(
+            rx.icon("activity", size=22, color=GREY_3),
+            rx.text(
+                "No steps yet. Send a message and every planning step, tool call, "
+                "grounding result and guardrail verdict lands here as it happens.",
+                size="2",
+                color=MUTED,
+                line_height="1.65",
+                text_align="center",
+                max_width="34ch",
+            ),
+            spacing="3",
+            align="center",
+            width="100%",
+            padding="2.5rem 1rem",
         ),
     )
 
 
 def trace_header() -> rx.Component:
     return rx.hstack(
-        rx.icon("activity", size=17, color=ACCENT),
-        rx.text("AGENT TRACE", size="2", weight="bold", color=TEXT, letter_spacing="0.1em"),
-        rx.badge(
+        rx.icon("activity", size=16, color=BRAND),
+        rx.text("AUDIT TRAIL", size="2", weight="bold", color=TEXT, letter_spacing=TRACK_EYEBROW),
+        rx.text(
             State.trace.length(),
-            variant="soft",
             size="1",
-            background=TINT_2,
+            weight="bold",
             color=BRAND,
+            font_family=MONO,
+            background=TINT_2,
+            padding="0.1rem 0.45rem",
+            border_radius=RADIUS_PILL,
         ),
         rx.spacer(),
-        rx.cond(State.is_thinking, rx.spinner(size="1")),
+        rx.cond(State.is_thinking, rx.spinner(size="1", color=BRAND)),
         rx.button(
-            rx.cond(State.show_trace, rx.icon("chevron-right", size=16), rx.icon("chevron-left", size=16)),
+            rx.icon("chevron-right", size=15),
             on_click=State.toggle_trace,
             variant="ghost",
             size="1",
             cursor="pointer",
+            color=MUTED,
+            aria_label="Hide the audit trail",
         ),
         width="100%",
         align="center",
         spacing="2",
-        padding="0.85rem 0.9rem",
+        padding="0.8rem 0.9rem",
         border_bottom=f"1px solid {BORDER}",
-        background=PANEL_2,
+        background=WHITE,
         position="sticky",
         top="0",
         z_index="2",
@@ -192,7 +245,8 @@ def trace_panel() -> rx.Component:
                 trace_header(),
                 rx.box(
                     trace_body(),
-                    padding="0.7rem",
+                    class_name="db-scroll",
+                    padding="0.6rem",
                     width="100%",
                     overflow_y="auto",
                     flex="1",
@@ -201,12 +255,12 @@ def trace_panel() -> rx.Component:
                 height="100%",
                 width="100%",
             ),
-            width=["100%", "100%", "100%", "400px"],
-            min_width=["auto", "auto", "auto", "400px"],
-            height=["24rem", "24rem", "24rem", "100vh"],
+            width=["100%", "100%", "100%", RAIL_W],
+            min_width=["auto", "auto", "auto", RAIL_W],
+            height=["24rem", "24rem", "24rem", "calc(100vh - 4.5rem)"],
             position=["static", "static", "static", "sticky"],
-            top="0",
-            background=PANEL,
+            top="4.5rem",
+            background=WHITE,
             border=f"1px solid {BORDER}",
             border_radius=[RADIUS, RADIUS, RADIUS, "0"],
             overflow="hidden",
@@ -214,13 +268,18 @@ def trace_panel() -> rx.Component:
         ),
         rx.box(
             rx.button(
-                rx.icon("activity", size=16),
+                rx.icon("activity", size=15),
+                rx.text("Audit trail", size="1", weight="bold", letter_spacing="0.06em"),
                 on_click=State.toggle_trace,
-                variant="soft",
+                variant="outline",
                 size="2",
                 cursor="pointer",
+                color=BRAND,
+                background=WHITE,
+                border_radius=RADIUS_PILL,
+                _hover={"background": TINT_2},
             ),
-            padding="0.6rem",
-            background=BG,
+            padding="1rem 0.9rem",
+            flex_shrink="0",
         ),
     )

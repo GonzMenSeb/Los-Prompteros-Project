@@ -1,6 +1,6 @@
 PY := PYTHONPATH=. ./.venv/bin/python
 PHASE ?= prewarm
-.PHONY: setup dev walkthrough rehearse tunnel check verify fixtures doctor clean
+.PHONY: setup dev walkthrough rehearse tunnel reload check verify fixtures doctor clean
 
 setup:
 	python3.12 -m venv .venv
@@ -29,6 +29,11 @@ rehearse:
 
 tunnel:
 	@bash scripts/tunnel.sh
+
+# Pick up .env / code changes WITHOUT minting new tunnel URLs, so a QR code already
+# in the wild stays valid. `make tunnel` would invalidate it.
+reload:
+	@bash scripts/reload.sh
 
 check:
 	$(PY) -m pytest -m "not live" -q

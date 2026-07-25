@@ -41,3 +41,6 @@ reflex.lock/
 
 # Quick-tunnel logs and the ephemeral judge URLs
 .tunnel/
+
+# LibreOffice/OpenOffice lock files for an open document
+.~lock.*#

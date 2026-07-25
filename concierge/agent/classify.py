@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
+from contextvars import ContextVar
 from functools import lru_cache
+from itertools import count
 from pathlib import Path
 from typing import Any
 
@@ -33,9 +36,8 @@ _BACKOFF = (1.0, 3.0, 7.0)
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
-@lru_cache(maxsize=1)
-def gemini_client() -> genai.Client:
-    key = os.environ.get("GEMINI_API_KEY")
+@lru_cache(maxsize=16)
+def gemini_client(key: str) -> genai.Client:
     if not key:
         raise RuntimeError("GEMINI_API_KEY missing — put it in .env")
     # Without an explicit timeout a stalled request hangs the turn forever, which
@@ -43,12 +45,57 @@ def gemini_client() -> genai.Client:
     return genai.Client(api_key=key, http_options=types.HttpOptions(timeout=120_000))
 
 
+_NUMBERED_KEY = re.compile(r"GEMINI_API_KEY(\d+)")
+
+
+def _demo_key() -> str:
+    """Reserved for the presenting laptop. Never handed to a public session."""
+    return os.environ.get("GEMINI_API_KEY", "")
+
+
+def public_keys() -> list[str]:
+    """The pool a QR-code audience shares.
+
+    Every `GEMINI_API_KEY<n>` (2, 3, …) in numeric order, plus anything in
+    comma-separated `GEMINI_PUBLIC_KEYS`. **`GEMINI_API_KEY` itself is deliberately
+    excluded** — the first key stays reserved for the presenting laptop, because
+    per-project quota is the one bottleneck no amount of in-app queueing can protect.
+
+    Falls back to the reserved key when no others are configured, so an unconfigured
+    deployment behaves exactly as it did before rotation existed.
+    """
+    numbered = sorted(
+        ((int(m.group(1)), v) for k, v in os.environ.items() if (m := _NUMBERED_KEY.fullmatch(k)) and v.strip()),
+        key=lambda pair: pair[0],
+    )
+    keys = [v.strip() for _, v in numbered]
+    keys += [k.strip() for k in os.environ.get("GEMINI_PUBLIC_KEYS", "").replace("\n", ",").split(",") if k.strip()]
+    return list(dict.fromkeys(keys)) or [_demo_key()]
+
+
+# Which key the current turn uses. A ContextVar for the same reason the trace sink is
+# one: it must be bound BEFORE asyncio.create_task(), because contextvars are copied at
+# task-creation time. See state.py.
+_key: ContextVar[str | None] = ContextVar("gemini_key", default=None)
+_rotation = count()
+
+
+def bind_key(key: str | None) -> None:
+    _key.set(key)
+
+
+def next_public_key() -> str:
+    pool = public_keys()
+    return pool[next(_rotation) % len(pool)]
+
+
 async def generate(**kwargs: Any) -> types.GenerateContentResponse:
     """The ONE place a Gemini request is issued. Retries transient 5xx/429."""
+    key = _key.get() or _demo_key()
     last: Exception | None = None
     for attempt in range(len(_BACKOFF) + 1):
         try:
-            return await gemini_client().aio.models.generate_content(**kwargs)
+            return await gemini_client(key).aio.models.generate_content(**kwargs)
         except (errors.ServerError, errors.ClientError) as exc:
             if getattr(exc, "code", None) not in _RETRY_CODES or attempt == len(_BACKOFF):
                 raise

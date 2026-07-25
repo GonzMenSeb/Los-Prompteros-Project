@@ -1,0 +1,247 @@
+/* Craft layer for DecaBot: only what a Reflex style prop cannot express —
+   pseudo-elements, keyframes, descendant selectors for rendered markdown, and
+   the reset that stops Radix's own TextField ring drawing inside our composer.
+   Surfaces and hover states stay in theme.py / the components. */
+
+:root {
+  --db-brand: #3643ba;
+  --db-brand-deep: #272f76;
+  --db-ink: #232323;
+  --db-muted: #707070;
+  --db-border: #e1e0df;
+  --db-tint-1: #f5f6fc;
+  --db-tint-2: #e7e8f7;
+  --db-tint-3: #d3d8f7;
+  --db-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --db-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--db-tint-3);
+  color: var(--db-ink);
+}
+
+/* One focus ring for the whole app, in the brand hue. */
+:focus-visible {
+  outline: 2px solid var(--db-brand);
+  outline-offset: 2px;
+  border-radius: 5px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.db-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.db-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@keyframes db-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.db-rise {
+  animation: db-rise 340ms var(--db-ease) both;
+}
+
+@keyframes db-halo {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(54, 67, 186, 0.5);
+  }
+  55% {
+    box-shadow: 0 0 0 6px rgba(54, 67, 186, 0);
+  }
+}
+
+.db-halo {
+  animation: db-halo 1.7s ease-out infinite;
+}
+
+/* Indeterminate progress rail for the running walkthrough. */
+@keyframes db-sweep {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(360%);
+  }
+}
+
+.db-track {
+  position: relative;
+  overflow: hidden;
+}
+
+.db-track::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.9), transparent);
+  animation: db-sweep 1.6s linear infinite;
+}
+
+/* Composer: the dock draws the field, so Radix must not draw one inside it. */
+.db-dock .rt-TextFieldRoot,
+.db-dock .rt-TextFieldRoot:focus-within {
+  box-shadow: none !important;
+  background: transparent !important;
+  outline: none !important;
+}
+
+.db-dock input {
+  outline: none !important;
+}
+
+.db-dock input::placeholder {
+  color: #a3a3a3;
+}
+
+/* Model output arrives as markdown. Radix's per-element classes are single-class
+   selectors, so these descendant rules outrank them without !important. */
+.db-md > *:first-child {
+  margin-top: 0;
+}
+
+.db-md > *:last-child {
+  margin-bottom: 0;
+}
+
+.db-md p {
+  margin: 0 0 0.7em;
+  line-height: 1.72;
+}
+
+.db-md h1,
+.db-md h2,
+.db-md h3,
+.db-md h4 {
+  margin: 1.5em 0 0.5em;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: var(--db-ink);
+}
+
+.db-md h1 {
+  font-size: 1.22em;
+}
+
+.db-md h2 {
+  font-size: 1.1em;
+}
+
+.db-md h3,
+.db-md h4 {
+  font-size: 1em;
+}
+
+.db-md ul,
+.db-md ol {
+  margin: 0 0 0.8em;
+  padding-left: 1.15em;
+}
+
+.db-md li {
+  margin: 0.3em 0;
+  line-height: 1.68;
+}
+
+.db-md li::marker {
+  color: var(--db-brand);
+}
+
+.db-md strong {
+  font-weight: 700;
+  color: var(--db-ink);
+}
+
+.db-md a {
+  color: var(--db-brand);
+  text-decoration: none;
+  border-bottom: 1px solid var(--db-tint-3);
+}
+
+.db-md a:hover {
+  border-bottom-color: var(--db-brand);
+}
+
+.db-md code {
+  font-family: var(--db-mono);
+  font-size: 0.88em;
+  background: var(--db-tint-1);
+  border: 1px solid var(--db-tint-2);
+  border-radius: 4px;
+  padding: 0.08em 0.32em;
+}
+
+.db-md hr {
+  border: 0;
+  border-top: 1px solid var(--db-border);
+  margin: 1.2em 0;
+}
+
+.db-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--db-tint-3) transparent;
+}
+
+.db-scroll::-webkit-scrollbar {
+  width: 11px;
+}
+
+.db-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.db-scroll::-webkit-scrollbar-thumb {
+  background: var(--db-tint-3);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+
+.db-scroll::-webkit-scrollbar-thumb:hover {
+  background: #b7c0ee;
+  background-clip: content-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
