@@ -1,0 +1,573 @@
+<title>Expedition Concierge — Technical Assessment</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+:root{
+  --ground:#EFF2F0; --surface:#FFFFFF; --sunk:#E4E9E6; --raised:#F7F9F8;
+  --line:rgba(19,26,24,0.13); --line-soft:rgba(19,26,24,0.07); --line-hard:rgba(19,26,24,0.26);
+  --ink:#0F1614; --body:#374440; --muted:#69766F; --faint:#8B968F;
+  --petrol:#175A66; --petrol-lift:#1D7383;
+  --lichen:#6E7C1B; --lichen-lift:#889818;
+  --ok:#256B41; --ok-bg:rgba(37,107,65,0.11);
+  --gate:#8A5E10; --gate-bg:rgba(138,94,16,0.12);
+  --stop:#98322F; --stop-bg:rgba(152,50,47,0.10);
+  --shade:0 1px 2px rgba(15,30,25,0.05), 0 8px 24px rgba(15,30,25,0.055);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --ground:#0B100F; --surface:#141A19; --sunk:#0E1413; --raised:#1A2220;
+    --line:rgba(158,186,177,0.16); --line-soft:rgba(158,186,177,0.08); --line-hard:rgba(158,186,177,0.32);
+    --ink:#FFFFFF; --body:#DCE5E1; --muted:#9DAAA4; --faint:#7A867F;
+    --petrol:#6FBECD; --petrol-lift:#96D6E2;
+    --lichen:#BCCC5E; --lichen-lift:#D2E07E;
+    --ok:#5CCB88; --ok-bg:rgba(92,203,136,0.13);
+    --gate:#DFB456; --gate-bg:rgba(223,180,86,0.13);
+    --stop:#FF8B84; --stop-bg:rgba(255,139,132,0.12);
+    --shade:0 1px 2px rgba(0,0,0,0.45), 0 10px 30px rgba(0,0,0,0.38);
+  }
+}
+:root[data-theme="light"]{
+  --ground:#EFF2F0; --surface:#FFFFFF; --sunk:#E4E9E6; --raised:#F7F9F8;
+  --line:rgba(19,26,24,0.13); --line-soft:rgba(19,26,24,0.07); --line-hard:rgba(19,26,24,0.26);
+  --ink:#0F1614; --body:#374440; --muted:#69766F; --faint:#8B968F;
+  --petrol:#175A66; --petrol-lift:#1D7383;
+  --lichen:#6E7C1B; --lichen-lift:#889818;
+  --ok:#256B41; --ok-bg:rgba(37,107,65,0.11);
+  --gate:#8A5E10; --gate-bg:rgba(138,94,16,0.12);
+  --stop:#98322F; --stop-bg:rgba(152,50,47,0.10);
+  --shade:0 1px 2px rgba(15,30,25,0.05), 0 8px 24px rgba(15,30,25,0.055);
+}
+:root[data-theme="dark"]{
+  --ground:#0B100F; --surface:#141A19; --sunk:#0E1413; --raised:#1A2220;
+  --line:rgba(158,186,177,0.16); --line-soft:rgba(158,186,177,0.08); --line-hard:rgba(158,186,177,0.32);
+  --ink:#FFFFFF; --body:#DCE5E1; --muted:#9DAAA4; --faint:#7A867F;
+  --petrol:#6FBECD; --petrol-lift:#96D6E2;
+  --lichen:#BCCC5E; --lichen-lift:#D2E07E;
+  --ok:#5CCB88; --ok-bg:rgba(92,203,136,0.13);
+  --gate:#DFB456; --gate-bg:rgba(223,180,86,0.13);
+  --stop:#FF8B84; --stop-bg:rgba(255,139,132,0.12);
+  --shade:0 1px 2px rgba(0,0,0,0.45), 0 10px 30px rgba(0,0,0,0.38);
+}
+
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--ground); color:var(--body);
+  font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  font-size:15px; line-height:1.62; -webkit-font-smoothing:antialiased;
+}
+code,.m{font-family:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;}
+h1,h2,h3,h4{color:var(--ink);margin:0;text-wrap:balance;}
+p{margin:0;}
+a{color:var(--petrol);text-decoration:none;border-bottom:1px solid transparent;transition:border-color .15s;word-break:break-word;}
+a:hover{border-bottom-color:var(--petrol);}
+a:focus-visible,summary:focus-visible,button:focus-visible{outline:2px solid var(--lichen);outline-offset:3px;border-radius:3px;}
+.wrap{max-width:1040px;margin:0 auto;padding:0 26px;}
+
+/* ---- masthead ---- */
+.mast{border-bottom:1px solid var(--line);background:var(--surface);}
+.mast .wrap{padding-top:46px;padding-bottom:34px;}
+.kicker{font-family:ui-monospace,monospace;font-size:11px;font-weight:700;letter-spacing:.19em;text-transform:uppercase;color:var(--lichen);margin-bottom:15px;}
+h1{font-size:clamp(28px,4.1vw,40px);line-height:1.08;font-weight:800;letter-spacing:-.028em;}
+.sub{font-size:16.5px;color:var(--muted);max-width:70ch;margin-top:15px;}
+.sub b{color:var(--body);font-weight:600;}
+.facts{display:flex;flex-wrap:wrap;gap:7px;margin-top:22px;}
+.fact{font-family:ui-monospace,monospace;font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:5px;border:1px solid var(--line);background:var(--raised);color:var(--muted);}
+.fact b{color:var(--ink);font-weight:700;}
+
+/* ---- verdict ---- */
+.verdict{margin-top:26px;border:1px solid var(--line);border-left:3px solid var(--lichen);border-radius:10px;background:var(--raised);padding:20px 22px;}
+.verdict h2{font-size:17px;font-weight:800;letter-spacing:-.012em;margin-bottom:9px;}
+.verdict p{font-size:14.5px;color:var(--body);max-width:82ch;}
+.verdict p + p{margin-top:10px;}
+.verdict b{color:var(--ink);}
+
+/* ---- sections ---- */
+section{padding:46px 0;border-bottom:1px solid var(--line-soft);}
+.shead{margin-bottom:20px;}
+.slabel{font-family:ui-monospace,monospace;font-size:10.5px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:var(--faint);margin-bottom:8px;}
+h2.st{font-size:23px;font-weight:800;letter-spacing:-.02em;}
+.slede{font-size:14.5px;color:var(--muted);max-width:82ch;margin-top:9px;}
+h3{font-size:15.5px;font-weight:750;letter-spacing:-.008em;margin-bottom:10px;}
+
+/* ---- code ---- */
+pre{margin:0;background:var(--sunk);border:1px solid var(--line);border-radius:9px;padding:14px 16px;overflow-x:auto;
+  font-family:ui-monospace,monospace;font-size:12.2px;line-height:1.62;color:var(--body);}
+pre b{color:var(--lichen);font-weight:700;}
+pre i{color:var(--faint);font-style:normal;}
+pre em{color:var(--petrol);font-style:normal;font-weight:600;}
+p code, li code, td code{font-size:12.2px;background:var(--sunk);border:1px solid var(--line-soft);padding:1px 5px;border-radius:4px;color:var(--ink);}
+
+/* ---- tool table ---- */
+.tscroll{overflow-x:auto;border:1px solid var(--line);border-radius:11px;background:var(--surface);box-shadow:var(--shade);}
+table{border-collapse:collapse;width:100%;min-width:660px;}
+th{background:var(--raised);border-bottom:1px solid var(--line-hard);text-align:left;padding:11px 15px;font-size:11px;font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--ink);white-space:nowrap;}
+td{padding:11px 15px;border-bottom:1px solid var(--line-soft);vertical-align:top;font-size:13.5px;}
+tbody tr:last-child td{border-bottom:none;}
+td.tool{font-family:ui-monospace,monospace;font-size:12.5px;font-weight:600;color:var(--ink);white-space:nowrap;}
+.pill{display:inline-block;font-family:ui-monospace,monospace;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:4px;white-space:nowrap;}
+.pill.ok{color:var(--ok);background:var(--ok-bg);}
+.pill.gate{color:var(--gate);background:var(--gate-bg);}
+.pill.stop{color:var(--stop);background:var(--stop-bg);}
+
+/* ---- flow spine ---- */
+.spine{display:flex;flex-direction:column;gap:0;margin-top:6px;}
+.step{display:grid;grid-template-columns:44px 1fr;gap:0 20px;position:relative;padding-bottom:26px;}
+.step:last-child{padding-bottom:0;}
+.step::before{content:"";position:absolute;left:21px;top:34px;bottom:0;width:1px;background:var(--line);}
+.step:last-child::before{display:none;}
+.snum{width:44px;height:34px;display:grid;place-items:center;font-family:ui-monospace,monospace;font-size:13px;font-weight:700;
+  color:var(--petrol);border:1px solid var(--line-hard);border-radius:7px;background:var(--surface);z-index:1;}
+.sbody{min-width:0;padding-top:4px;}
+.stitle{font-size:15.5px;font-weight:750;color:var(--ink);letter-spacing:-.008em;}
+.squote{font-size:13.5px;color:var(--muted);font-style:italic;margin-top:5px;}
+.scalls{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px;}
+.call{font-family:ui-monospace,monospace;font-size:11px;font-weight:650;padding:3px 9px;border-radius:5px;border:1px solid var(--line);
+  background:var(--sunk);color:var(--petrol);}
+.call.none{color:var(--faint);}
+.sdesc{font-size:13.8px;color:var(--body);margin-top:11px;max-width:80ch;}
+.sdesc + .sdesc{margin-top:8px;}
+.sdesc b{color:var(--ink);}
+.guard{margin-top:11px;padding:9px 13px;border-radius:7px;background:var(--ok-bg);border-left:2px solid var(--ok);font-size:12.8px;color:var(--body);}
+.guard b{color:var(--ok);font-weight:700;}
+
+/* ---- decision cards ---- */
+.decks{display:flex;flex-direction:column;gap:16px;}
+.deck{border:1px solid var(--line);border-radius:12px;background:var(--surface);box-shadow:var(--shade);overflow:hidden;}
+.dhead{padding:14px 20px;border-bottom:1px solid var(--line-soft);background:var(--raised);}
+.dq{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);font-family:ui-monospace,monospace;}
+.dtitle{font-size:16px;font-weight:750;color:var(--ink);margin-top:4px;letter-spacing:-.01em;}
+.dopts{display:flex;flex-direction:column;}
+.opt{display:grid;grid-template-columns:auto 1fr;gap:3px 13px;padding:13px 20px;border-bottom:1px solid var(--line-soft);}
+.opt:last-child{border-bottom:none;}
+.opt.pick{background:var(--ok-bg);}
+.omark{font-family:ui-monospace,monospace;font-size:11px;font-weight:700;padding-top:2px;color:var(--faint);white-space:nowrap;}
+.opt.pick .omark{color:var(--ok);}
+.oname{font-size:14px;font-weight:700;color:var(--ink);}
+.oname .tag{font-family:ui-monospace,monospace;font-size:10px;font-weight:700;color:var(--ok);background:var(--ok-bg);
+  border:1px solid var(--ok);padding:1px 6px;border-radius:4px;margin-left:8px;letter-spacing:.04em;vertical-align:1px;}
+.owhy{grid-column:2;font-size:13.2px;color:var(--muted);margin-top:2px;}
+.owhy b{color:var(--body);}
+
+/* ---- constraint blocks ---- */
+.cons{display:flex;flex-direction:column;gap:14px;}
+.con{border:1px solid var(--line);border-left:3px solid var(--stop);border-radius:10px;background:var(--surface);padding:16px 19px;}
+.con.warn{border-left-color:var(--gate);}
+.con h4{font-size:14.5px;font-weight:750;color:var(--ink);margin-bottom:7px;}
+.con p{font-size:13.5px;color:var(--body);max-width:84ch;}
+.con p + p{margin-top:8px;}
+.con .fix{margin-top:10px;font-size:13px;color:var(--body);padding:9px 12px;border-radius:7px;background:var(--sunk);}
+.con .fix b{color:var(--lichen);font-weight:700;}
+
+/* ---- timeline ---- */
+.tl{display:flex;flex-direction:column;gap:2px;}
+.slot{display:grid;grid-template-columns:104px 1fr;gap:16px;padding:13px 0;border-top:1px solid var(--line-soft);}
+.slot:first-child{border-top:none;}
+.stime{font-family:ui-monospace,monospace;font-size:12px;font-weight:700;color:var(--petrol);padding-top:1px;white-space:nowrap;}
+.swhat{font-size:13.8px;color:var(--body);}
+.swhat b{color:var(--ink);font-weight:700;display:block;margin-bottom:2px;}
+.swhat .who{font-family:ui-monospace,monospace;font-size:11px;color:var(--faint);margin-left:0;}
+
+/* ---- checks ---- */
+.checks{display:flex;flex-direction:column;gap:11px;counter-reset:ck;}
+.check{display:grid;grid-template-columns:26px 1fr;gap:13px;font-size:13.8px;color:var(--body);}
+.check::before{counter-increment:ck;content:counter(ck);width:22px;height:22px;border-radius:50%;background:var(--petrol);color:var(--surface);
+  font-family:ui-monospace,monospace;font-size:11px;font-weight:700;display:grid;place-items:center;margin-top:1px;}
+.check b{color:var(--ink);}
+.check .sc{font-family:ui-monospace,monospace;font-size:10.5px;font-weight:700;color:var(--lichen);letter-spacing:.05em;}
+
+ul.tight{margin:0;padding-left:19px;display:flex;flex-direction:column;gap:6px;font-size:13.8px;}
+ul.tight li::marker{color:var(--faint);}
+.gap{display:flex;flex-direction:column;gap:22px;}
+.note{font-size:12.8px;color:var(--faint);margin-top:12px;max-width:84ch;}
+
+footer{padding:32px 0 60px;}
+.foot{font-size:12.5px;color:var(--faint);max-width:88ch;}
+.foot b{color:var(--muted);}
+
+#tt{position:fixed;right:15px;bottom:15px;z-index:60;font:650 11.5px/1 ui-monospace,monospace;display:flex;align-items:center;gap:7px;
+  padding:9px 13px;border-radius:7px;cursor:pointer;color:var(--muted);background:var(--surface);border:1px solid var(--line-hard);box-shadow:var(--shade);}
+#tt:hover{color:var(--ink);}
+
+@media (prefers-reduced-motion:reduce){*{transition:none!important;}}
+@media (max-width:700px){
+  .wrap{padding:0 17px;}
+  .step{grid-template-columns:34px 1fr;gap:0 14px;}
+  .step::before{left:16px;}
+  .snum{width:34px;height:30px;font-size:12px;}
+  .slot{grid-template-columns:1fr;gap:3px;}
+  .opt{grid-template-columns:1fr;gap:3px;}
+  .owhy{grid-column:1;}
+}
+</style>
+
+<div class="mast"><div class="wrap">
+  <p class="kicker">Technical assessment · verified live 24 Jul 2026</p>
+  <h1>Expedition Concierge</h1>
+  <p class="sub">A conversational agent that turns <b>“we're hiking Páramo de Santurbán and camping two nights”</b> into a real, size-resolved, in-stock Decathlon cart — grounded end to end in Decathlon's own agent-commerce protocol. This document maps every step of that flow to the exact endpoint that serves it, and gives you the stack decisions with alternatives.</p>
+  <div class="facts">
+    <span class="fact">Build window <b>3.5 h</b></span>
+    <span class="fact">Team <b>3–4</b></span>
+    <span class="fact">Auth needed <b>none</b></span>
+    <span class="fact">UCP tools open <b>8 of 10</b></span>
+    <span class="fact">Cart creation <b>verified</b></span>
+  </div>
+
+  <div class="verdict">
+    <h2>Verdict — build it, and end the flow at the cart</h2>
+    <p>The idea is not just feasible, it is <b>more feasible than the 7-ideas doc claimed</b>. That doc marked Decathlon's MCP endpoint “partial — needs a UCP handshake we couldn't complete.” I completed it. The handshake is a single URL you paste into every request; there is no registration, no key, no OAuth. From a cold start I ran a catalog search, resolved a shoe size to a variant, and <b>created a real Decathlon cart with a working browser link</b> — all unauthenticated.</p>
+    <p>Four findings change the design, and you want them now rather than at 11:40. <b>One:</b> <code>tools/list</code> never works on this endpoint — you call tools directly by name, so an off-the-shelf MCP client library will fail and you should not use one. <b>Two:</b> product search does not return stock; only <code>get_product</code> does, and it is also the clean way to turn “I'm a men's 9½” into a variant ID. <b>Three:</b> search returns <b>nothing at all</b> for long descriptive queries — the exact kind an LLM writes unprompted — so query discipline has to be baked into the tool description on day one. <b>Four:</b> the US store will not ship to Colombia; checkout returns <code>delivery_no_delivery_available_for_merchandise_line</code>. So the demo ends at a real cart, which is both the honest stopping point and the one Decathlon's own <code>agents.md</code> prescribes, since it forbids agents completing payment without contemporaneous human approval.</p>
+  </div>
+</div></div>
+
+<div class="wrap">
+
+<section>
+  <div class="shead">
+    <p class="slabel">The unlock</p>
+    <h2 class="st">The handshake, solved</h2>
+    <p class="slede">Every cold call to Decathlon's MCP endpoint fails with <code>-32001 · Missing profile uri</code>. UCP requires the calling agent to identify itself with a hosted capability profile. The profile does not have to be yours — Shopify publishes a valid example one, and Decathlon accepts it.</p>
+  </div>
+
+  <div class="gap">
+  <div>
+    <h3>What fails</h3>
+<pre>POST https://www.decathlon.com/api/ucp/mcp
+{"jsonrpc":"2.0","id":1,"method":<b>"tools/list"</b>}
+
+<i>→ {"error":{"code":-32001,"message":"UCP discovery failed",
+     "data":{"code":"invalid_profile_url",
+             "content":"Unable to fetch agent profile: Missing profile uri"}}}</i>
+
+<i># tools/list fails even WITH a profile attached, in every position
+# (params.meta, params._meta, HTTP header). Treat it as unavailable.</i></pre>
+  </div>
+
+  <div>
+    <h3>What works — the profile goes inside <code>arguments.meta</code>, on <code>tools/call</code></h3>
+<pre>POST https://www.decathlon.com/api/ucp/mcp
+Content-Type: application/json
+
+{"jsonrpc":"2.0","id":1,"method":<b>"tools/call"</b>,
+ "params":{
+   "name":<em>"search_catalog"</em>,
+   "arguments":{
+     <b>"meta":{"ucp-agent":{"profile":
+       "https://shopify.dev/ucp/agent-profiles/examples/2026-04-08/valid-with-capabilities.json"}},</b>
+     "catalog":{
+       "query":"waterproof hiking boots",
+       "context":{"address_country":"US","currency":"USD"},
+       "pagination":{"limit":2}}}}}
+
+<i>→ 200 · real products, prices, images, variants</i></pre>
+    <p class="note">The response body arrives as a JSON <em>string</em> inside <code>result.content[0].text</code> — you must <code>json.loads()</code> it a second time. Every response also echoes a large <code>ucp</code> capability block; drop it before showing the model, it is pure token burn.</p>
+  </div>
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <p class="slabel">Surface map</p>
+    <h2 class="st">Every tool, and which ones you can actually reach</h2>
+    <p class="slede">I probed each tool individually. A schema-validation error proves the tool exists and is callable; an <code>AuthenticationRequired</code> error proves it is gated. Eight of the ten are open to you with zero credentials.</p>
+  </div>
+
+  <div class="tscroll"><table>
+    <thead><tr><th>UCP tool</th><th>Status</th><th>What it gives you / why you care</th></tr></thead>
+    <tbody>
+      <tr><td class="tool">search_catalog</td><td><span class="pill ok">OPEN</span></td><td>Free-text product search. Returns title, URL, handle, description, price range, <code>media[].url</code>, and the full variant list. <b>Your main discovery call.</b> Note: no stock data here.</td></tr>
+      <tr><td class="tool">get_product</td><td><span class="pill ok">OPEN</span></td><td>The workhorse. With a partial <code>catalog.selected</code> it returns a per-size availability grid; with a full selection it returns the exact variant ID plus <code>availability.available</code>. <b>This is your size resolver and your stock guardrail.</b></td></tr>
+      <tr><td class="tool">lookup_catalog</td><td><span class="pill ok">OPEN</span></td><td>Batch fetch up to 10 products/variants by ID. Useful to re-price a whole proposed kit in one call before showing a total.</td></tr>
+      <tr><td class="tool">create_cart</td><td><span class="pill ok">OPEN</span></td><td>Builds a real cart from many line items at once and returns a <code>continue_url</code> that opens the live cart on decathlon.com. <b>This is your demo's money shot.</b></td></tr>
+      <tr><td class="tool">get_cart</td><td><span class="pill ok">OPEN</span></td><td>Re-read a cart by ID. Good for a “refresh totals” button.</td></tr>
+      <tr><td class="tool">update_cart</td><td><span class="pill ok">OPEN</span></td><td>Change quantities or lines on an existing cart — backs the “swap the jacket” iteration loop without rebuilding from scratch.</td></tr>
+      <tr><td class="tool">create_checkout</td><td><span class="pill gate">OPEN, BUT</span></td><td>Works and returns a checkout ID, but comes back <code>status: requires_escalation</code> and demands a delivery address. Optional stretch only.</td></tr>
+      <tr><td class="tool">update_checkout</td><td><span class="pill gate">OPEN, BUT</span></td><td>Sets shipping address/method. Only meaningful with a US address — see constraints.</td></tr>
+      <tr><td class="tool">complete_checkout</td><td><span class="pill stop">JWT</span></td><td><code>AuthenticationRequired</code>. Needs a signed agent JWT you cannot obtain today. <b>Do not spend a minute on it.</b></td></tr>
+      <tr><td class="tool">get_order</td><td><span class="pill stop">JWT</span></td><td><code>AuthenticationRequired</code>. Same. Out of scope.</td></tr>
+    </tbody>
+  </table></div>
+
+  <p class="note"><b>Free fallbacks, no handshake at all.</b> If the MCP endpoint rate-limits you mid-demo (<code>agents.md</code> warns it is per-IP limited), these plain Shopify feeds still answer: <code>/products.json?limit=N</code>, <code>/products/{handle}.json</code>, <code>/collections/{handle}/products.json</code>, and <code>/search/suggest.json?q=…&amp;resources[type]=product</code> — the last is a genuinely fast keyword search. Keep one of them wired as a backup path.</p>
+</section>
+
+<section>
+  <div class="shead">
+    <p class="slabel">The build</p>
+    <h2 class="st">Conversation flow, mapped call by call</h2>
+    <p class="slede">Six steps from “I'm going to Santurbán” to a live cart. Each step names the exact tool that serves it — this mapping is the thing the architecture review scores.</p>
+  </div>
+
+  <div class="spine">
+
+    <div class="step">
+      <div class="snum">01</div>
+      <div class="sbody">
+        <p class="stitle">User describes the expedition</p>
+        <p class="squote">“Voy a subir al Páramo de Santurbán con mi novia, acampamos dos noches y bajamos.”</p>
+        <div class="scalls"><span class="call">Gemini · google_search</span><span class="call none">no Decathlon call yet</span></div>
+        <p class="sdesc">The agent does not yet know what Santurbán is. It reaches for <b>Gemini's built-in Google Search tool</b> to establish real conditions: páramo biome above ~3,000 m, near-saturated humidity, 2–10 °C with sub-zero wind chill at night, permanently boggy ground, extreme UV, and a protected-area regulation context. Search grounding returns citations, so the conditions are attributable rather than invented.</p>
+        <p class="sdesc">This is the step that earns the rubric's “knowledge tool integration” milestone. <b>Do not hardcode it</b> — it is the single most visible piece of real reasoning in the demo.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="snum">02</div>
+      <div class="sbody">
+        <p class="stitle">Agent asks a short, targeted set of questions</p>
+        <div class="scalls"><span class="call none">pure LLM · no tools</span></div>
+        <p class="sdesc">Slot-filling against a fixed schema: <b>budget, two sets of sizes (footwear + apparel, per person), and what they already own.</b> Cap it at four questions — the user explicitly asked for “not too many more questions,” and a concierge that interrogates you is a worse demo than one that infers.</p>
+        <p class="sdesc">Infer aggressively from step 1 rather than asking: two people and two nights are already stated, so tent capacity and sleeping-bag count are derivable. Ask only what cannot be inferred.</p>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="snum">03</div>
+      <div class="sbody">
+        <p class="stitle">Conditions become gear slots, gear slots become searches</p>
+        <div class="scalls"><span class="call">search_catalog × N</span></div>
+        <p class="sdesc">The model turns conditions into a <b>kit plan</b> — a list of slots with a rationale each: waterproof mid boots (boggy ground), hardshell jacket (near-100 % humidity), insulating midlayer (night cold), 3-season 2-person tent, sleeping bags rated to ~0 °C, waterproof pack covers, trekking poles.</p>
+        <p class="sdesc">Each slot becomes one <code>search_catalog</code> call. <b>Gender goes in the query string and it genuinely works</b> — I verified that “womens waterproof hiking boots” returns four distinct women's SKUs and “mens …” returns four men's SKUs, not one list reranked. That is how you serve both people from one catalog. Fire the slot searches concurrently; they are independent and this is where your wall-clock goes.</p>
+        <div class="guard"><b>Guardrail ·</b> keep queries to <b>two or three words</b>. Long descriptive queries return nothing at all — see the hazard below. This constrains your prompt, not your code.</div>
+        <div class="guard"><b>Guardrail ·</b> prices come back in <b>minor units</b> — <code>5000</code> means $50.00. Divide by 100 exactly once, at the presentation boundary. Getting this wrong makes your budget arithmetic silently 100× off.</div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="snum">04</div>
+      <div class="sbody">
+        <p class="stitle">Resolve each pick to a real, in-stock size</p>
+        <div class="scalls"><span class="call">get_product · partial selected</span><span class="call">get_product · full selected</span></div>
+        <p class="sdesc">Two passes on the same tool. First, pass a partial selection to read the availability grid — Decathlon tells you exactly which sizes exist and which are in stock:</p>
+<pre>"options":[{"name":"Size","values":[
+   {"label":"8",  <b>"available":true</b>,  "exists":true},
+   {"label":"9",  <b>"available":false</b>, "exists":true},   <i>&lt;- exists but out of stock</i>
+   {"label":"9.5",<b>"available":true</b>,  "exists":true}]}]</pre>
+        <p class="sdesc">Then pass the <b>complete</b> selection (colour + size) and the response collapses to the single matching variant with its <code>id</code>, <code>sku</code>, price and <code>availability.available</code>. That variant ID is what the cart takes.</p>
+        <div class="guard"><b>Guardrail ·</b> this is your anti-hallucination proof. Never parse sizes out of variant title strings like <code>"Smoked Black / 9.5"</code> — it breaks the moment apparel uses S/M/L or EU numbering. And if the requested size is unavailable, <b>say so and offer the nearest in-stock size</b>. A judge will try exactly this.</div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="snum">05</div>
+      <div class="sbody">
+        <p class="stitle">Present the kit with photos, then iterate</p>
+        <div class="scalls"><span class="call none">render only</span><span class="call">search_catalog · re-run one slot</span></div>
+        <p class="sdesc">Images need <b>no work at all</b>: <code>media[].url</code> is a plain <code>cdn.shopify.com</code> URL. Drop it straight into <code>st.image()</code> or a markdown <code>![]()</code>. No downloading, no base64, no proxy.</p>
+        <p class="sdesc">Show each item as a card — photo, name, resolved size, price, rationale sentence, link to the real product page — with a running total against the stated budget. When the user pushes back (“the jacket's too expensive”), <b>re-run only that slot's search</b> with a price ceiling and keep everything else pinned. Rebuilding the whole kit on every objection is the classic failure here and it reads badly on stage.</p>
+        <div class="guard"><b>Guardrail ·</b> sum the real variant prices and compare to budget in code, not in the prompt. If nothing fits, report the gap honestly rather than inventing a cheaper product.</div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="snum">06</div>
+      <div class="sbody">
+        <p class="stitle">Build the real cart — and stop there</p>
+        <div class="scalls"><span class="call">create_cart</span><span class="call">update_cart</span><span class="call">get_cart</span></div>
+        <p class="sdesc">One call with every line item, both people's gear together. The correct shape nests the variant under <code>item</code> — <code>cart.line_items[].item.id</code>, not <code>merchandise_id</code>:</p>
+<pre>{"name":"create_cart","arguments":{
+   "meta":{"ucp-agent":{"profile":"…"}},
+   "cart":{"line_items":[{<b>"item":{"id":"gid://shopify/ProductVariant/41923101622334"}</b>,"quantity":1},
+                         {<b>"item":{"id":"gid://shopify/ProductVariant/…"}</b>,"quantity":1}],
+           "context":{"address_country":"US","currency":"USD"}}}}
+
+<i>→ cart id, per-line totals, grand total, expires_at, policy links, and:</i>
+<b>"continue_url":"https://…/cart/c/hWNEsAjQAMMiC68FtejMNL4k?key=b16dc669…"</b>
+<i>   which 301-redirects to https://www.decathlon.com/cart/c/… — a real, browsable cart</i></pre>
+        <p class="sdesc"><b>Hand the judge that link.</b> They open it and see the exact items, sizes and prices your agent chose, sitting in Decathlon's own cart. Nothing about that can be faked, and it is a far stronger proof than a screenshot of a checkout you couldn't complete.</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <p class="slabel">Decisions</p>
+    <h2 class="st">The stack, with alternatives for each</h2>
+    <p class="slede">Recommendation first in every block, then the real alternatives and what they cost you. Optimised for a 3.5-hour window with three or four people.</p>
+  </div>
+
+  <div class="decks">
+
+    <div class="deck">
+      <div class="dhead"><p class="dq">Decision 01</p><p class="dtitle">How to talk to Decathlon's MCP endpoint</p></div>
+      <div class="dopts">
+        <div class="opt pick"><span class="omark">PICK</span><p class="oname">Hand-rolled JSON-RPC over <code>httpx</code><span class="tag">RECOMMENDED</span></p><p class="owhy">Four short functions and about 30 lines. <b>The 7-ideas doc's suggestion of the MCP Python SDK is now known-wrong</b> — a real MCP client opens with <code>initialize</code> and <code>tools/list</code>, and I verified both are rejected by this endpoint. A library will fight you; a POST will not.</p></div>
+        <div class="opt"><span class="omark">ALT</span><p class="oname">Official MCP SDK</p><p class="owhy">Will not connect. Only worth it if you also want to <em>expose</em> your concierge as an MCP server for other agents — a nice innovation angle, but a separate build.</p></div>
+        <div class="opt"><span class="omark">ALT</span><p class="oname"><code>requests</code> instead of <code>httpx</code></p><p class="owhy">Perfectly fine. You lose easy concurrency for the parallel slot searches in step 3, which is the one place it matters.</p></div>
+      </div>
+    </div>
+
+    <div class="deck">
+      <div class="dhead"><p class="dq">Decision 02</p><p class="dtitle">Model SDK and the agent loop</p>
+        <p class="owhy" style="margin-top:8px"><b>Now verified —</b> executed against the project's real key with <code>google-genai</code> 2.14.0. <code>gemini-3.6-flash</code> resolves; search grounding returns citations. <b>Two caveats found by testing:</b> combining built-in and custom tools requires <code>tool_config.include_server_side_tool_invocations=True</code> or the request 400s, and combined mode drops structured citations — so the pipeline is two-phase. See the stack spec.</p>
+      </div>
+      <div class="dopts">
+        <div class="opt pick"><span class="omark">PICK</span><p class="oname"><code>google-genai</code> · <code>gemini-3.6-flash</code><span class="tag">RECOMMENDED</span></p><p class="owhy">You already have the key. Flash is fast enough that the loop feels conversational on stage. Per Google's docs, Gemini 3 lets you pass <b>built-in tools and your own functions in the same <code>tools</code> array</b>, so search grounding and catalog calls live in one loop instead of two orchestrated passes. <b>First task tomorrow: <code>pip install google-genai</code> and make one trivial call to confirm the model ID resolves</b> — model names move, and a wrong string costs a whole work block.</p></div>
+        <div class="opt"><span class="omark">ALT</span><p class="oname">Gemini via the legacy <code>generate_content</code> API</p><p class="owhy">The <code>client.interactions.create</code> surface is current, but <code>generate_content</code> has years more example code in the wild. <b>This is your fallback if the newer surface trips anyone up</b> — the trade is that you manage conversation history manually. Decide in the first ten minutes, not at 10:30.</p></div>
+        <div class="opt"><span class="omark">ALT</span><p class="oname">Groq or an OpenAI-compatible endpoint</p><p class="owhy">Faster tokens, but you lose built-in search grounding and must bolt on a separate search API. Given that grounding is a scored milestone, this trades away points for latency you don't need.</p></div>
+      </div>
+    </div>
+
+    <div class="deck">
+      <div class="dhead"><p class="dq">Decision 03</p><p class="dtitle">Where the environmental knowledge comes from</p></div>
+      <div class="dopts">
+        <div class="opt pick"><span class="omark">PICK</span><p class="oname">Gemini's built-in <code>{"type":"google_search"}</code> tool<span class="tag">RECOMMENDED</span></p><p class="owhy">One entry in the tools array. Returns citations you can display, which turns “the agent knows páramos are wet” into something a judge can check. Confirmed combinable with custom function declarations in a single request.</p></div>
+        <div class="opt"><span class="omark">ALT</span><p class="oname">Curated activity-profile JSON for 3–4 scenarios</p><p class="owhy">Deterministic and instant — a genuinely sensible safety net. But a judge who asks for an activity you didn't pre-load will expose it, and pre-baked knowledge reads as mocked under a rubric that weights innovation at 30 %. <b>Good as a fallback, bad as the plan.</b></p></div>
+        <div class="opt"><span class="omark">ALT</span><p class="oname">A dedicated search API (Tavily, Serper)</p><p class="owhy">More control over sources, another key to manage and another failure point. Only if Gemini grounding misbehaves.</p></div>
+      </div>
+    </div>
+
+    <div class="deck">
+      <div class="dhead"><p class="dq">Decision 04</p><p class="dtitle">Chat surface</p></div>
+      <div class="dopts">
+        <div class="opt pick"><span class="omark">PICK</span><p class="oname">Streamlit — <code>st.chat_message</code> + <code>st.image</code><span class="tag">RECOMMENDED</span></p><p class="owhy">Chat UI and inline product photos are roughly ten lines. Nothing else gets you a demoable conversational interface with image cards inside the time budget, and the whole team can run it locally without a build step.</p></div>
+        <div class="opt"><span class="omark">ALT</span><p class="oname">Next.js + Vercel AI SDK</p><p class="owhy">Noticeably better-looking, and the right call <b>only if the team is JS-first</b>. Presentation is 10 % of the score; don't buy it with 90 minutes of the build.</p></div>
+        <div class="opt"><span class="omark">ALT</span><p class="oname">Gradio</p><p class="owhy">Comparable effort to Streamlit, weaker layout control for product grids. No reason to prefer it here.</p></div>
+      </div>
+    </div>
+
+    <div class="deck">
+      <div class="dhead"><p class="dq">Decision 05</p><p class="dtitle">Conversation state</p></div>
+      <div class="dopts">
+        <div class="opt pick"><span class="omark">PICK</span><p class="oname">Server-side via <code>previous_interaction_id</code><span class="tag">RECOMMENDED</span></p><p class="owhy">Gemini threads the history for you; you keep only the slot-filling state (budget, sizes, chosen kit) in <code>st.session_state</code>. Fewer moving parts and no token-bloat from replaying transcripts.</p></div>
+        <div class="opt"><span class="omark">ALT</span><p class="oname">Full message list in <code>st.session_state</code></p><p class="owhy">Explicit and easy to debug when a tool call goes wrong. Costs tokens on every turn and you must remember to strip the huge <code>ucp</code> blocks yourself.</p></div>
+      </div>
+    </div>
+
+    <div class="deck">
+      <div class="dhead"><p class="dq">Decision 06</p><p class="dtitle">Which UCP agent profile you present</p></div>
+      <div class="dopts">
+        <div class="opt pick"><span class="omark">PICK</span><p class="oname">Shopify's public example profile<span class="tag">RECOMMENDED</span></p><p class="owhy">Verified working against Decathlon today, costs zero minutes: <code>shopify.dev/ucp/agent-profiles/examples/2026-04-08/valid-with-capabilities.json</code>. Start here so you are transacting inside the first hour.</p></div>
+        <div class="opt"><span class="omark">ALT</span><p class="oname">Host your own profile on GitHub Pages</p><p class="owhy">About 15 minutes: a small JSON declaring <code>ucp.version</code>, <code>services</code> and <code>capabilities</code>, served over HTTPS. <b>Worth doing once the flow works</b> — “we published our own agent identity and Decathlon negotiated capabilities with it” is a stronger story than borrowing Shopify's, and it is a real innovation beat.</p></div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <p class="slabel">Known hazards</p>
+    <h2 class="st">Four things that will bite you</h2>
+    <p class="slede">All four are confirmed behaviours, not speculation. Each has a decided response.</p>
+  </div>
+
+  <div class="cons">
+
+    <div class="con">
+      <h4>The US store does not ship to Colombia</h4>
+      <p>Calling <code>create_checkout</code> with <code>address_country: "CO"</code> succeeds but returns an extra message the US path does not have: <code>delivery_no_delivery_available_for_merchandise_line</code> — “the items you added can't be shipped to your address.” <code>decathlon.com.co</code> is a different site entirely: it returns <b>403</b>, and has no <code>agents.md</code> and no <code>.well-known/ucp</code>. The agent-commerce layer exists <b>only</b> on the US store.</p>
+      <div class="fix"><b>Response ·</b> Keep the Colombian scenario — it is the better story and the concierge reasoning is identical. State plainly, once, up front: “Decathlon's agent-commerce protocol is live on their US store, so that's our grounding; prices are USD.” End the flow at <code>create_cart</code>, which works regardless of country. <b>Do not attempt checkout on stage</b>, and do not quietly swap the scenario to a US hike — a judge who reads <code>agents.md</code> will respect the honest framing more than a dodge.</div>
+    </div>
+
+    <div class="con">
+      <h4>Search does not tell you what is in stock</h4>
+      <p>Every variant returned by <code>search_catalog</code> has a null availability field, and <code>/products/{handle}.json</code> is null too for the same product. If you claim “a real, in-stock cart” on the strength of search results alone, you are claiming something you did not check.</p>
+      <div class="fix"><b>Response ·</b> Route every final pick through <code>get_product</code> before it enters the cart. It is one extra call per item and it is the difference between a grounded claim and a lucky one.</div>
+    </div>
+
+    <div class="con">
+      <h4>Long queries return nothing — and an LLM writes long queries by default</h4>
+      <p>This is the one most likely to sink you, because it fails silently and looks like empty inventory. <code>search_catalog</code> does not degrade gracefully on descriptive queries; it returns <b>zero products</b>. Measured, same endpoint, same minute:</p>
+<pre><em>"sleeping bag"</em>                                 <b>→ 3 products</b>
+<em>"warm sleeping bag"</em>                            <b>→ 3 products</b>
+<em>"sleeping bag 0 degrees celsius"</em>               <i>→ 0 products</i>
+<em>"camping sleeping bag for cold weather two people"</em> <i>→ 0 products</i></pre>
+      <p>An unprompted model asked to find gear for a cold, wet, high-altitude camp will emit exactly the bottom two. It will then report that Decathlon sells no sleeping bags, which is false.</p>
+      <div class="fix"><b>Response ·</b> Put it in the tool description, not just the system prompt: <em>“query must be a 1–3 word product noun phrase; put gender in the query, never conditions or specifications.”</em> Keep the reasoning about temperature ratings in the <b>selection</b> step, after retrieval — the model filters candidates on what it knows, it does not ask the search engine to filter. Retry any empty result once with the query truncated to its head noun.</div>
+    </div>
+
+    <div class="con warn">
+      <h4>Inventory is deep on some slots and thin on others</h4>
+      <p>Verified against the live US catalog: <b>tents</b> are well stocked (four 2–3 person Quechua pop-ups, $149–$359), as are <b>rain jackets</b> (gendered), <b>pack rain covers</b> ($12.99–$19.99) and <b>fleeces</b> (gendered). <b>Trekking poles</b> exist but relevance is loose — the results mix in backpacks. <b>Sleeping bags are the weak slot:</b> essentially one relevant SKU, a Simond MT500 rated <b>41 °F (≈5 °C)</b>.</p>
+      <div class="fix"><b>Response ·</b> Do not quietly drop the sleeping-bag slot — <b>turn it into the demo's best moment.</b> A páramo night runs near freezing, so the honest agent says: “the warmest bag Decathlon US carries is rated 5 °C, which is marginal for Santurbán — I'm including it and recommending a liner and a thermal base layer to extend it.” That is a concierge reasoning about a real constraint in real inventory, and no product-search demo can imitate it.</div>
+    </div>
+
+    <div class="con">
+      <h4>Rate limiting: huge headroom, then an 8.5-minute cliff</h4>
+      <p>I measured it rather than guessing. Normal use is nowhere near the limit — but the penalty for crossing it outlasts your demo slot.</p>
+<pre>20 sequential, no delay   <b>20/20 · 200 OK</b>   ~0.48 s each, no degradation
+15 concurrent             <b>15/15 · 200 OK</b>
+40 concurrent             <b>40/40 · 200 OK</b>   ~0.52 s median
+100 concurrent            <i>85 × 429</i>          Retry-After: <i>509</i></pre>
+      <p>The ceiling is between 40 and 100 simultaneous requests. Your kit plan fires about seven parallel slot searches — <b>six times under the lowest level I confirmed clean.</b> You will not hit this by accident during a conversation.</p>
+      <p>Recovery is where it gets interesting — and where <b><code>Retry-After</code> lies to you</b>. I polled a single request every 45 s until it cleared:</p>
+<pre>t+   0s   429   Retry-After=487
+t+  45s   429   Retry-After=441
+t+  91s   429   Retry-After=396
+t+ 136s   429   Retry-After=350
+t+ 182s   429   Retry-After=305      <i>&lt;- header still claims 5 more minutes</i>
+t+ 227s   <b>200   RECOVERED</b>          <i>&lt;- actually back after ~4 minutes</i></pre>
+      <p>The header decrements exactly 1:1 with wall-clock, so it looks authoritative — but real access returned <b>more than four minutes before the moment it pointed at</b>. Combined with the trickle observed during lockout (waves 2, 5 and 6 each leaked exactly 1 success out of 25), the behaviour is consistent with a <b>token bucket refilling gradually</b>, where <code>Retry-After</code> advertises a pessimistic full-refill time rather than the moment usable capacity returns.</p>
+      <p>So the cliff is real but shallower than the header implies: roughly <b>4 minutes</b>, not the ~8 advertised. Retrying during lockout does <b>not</b> extend it — the counter kept descending under sustained abuse — so a buggy retry loop cannot dig you deeper.</p>
+      <div class="fix"><b>Response ·</b> The risk is a <b>runaway loop</b>, not normal traffic — an unbounded retry or a <code>for product in results:</code> calling <code>get_product</code> per item spends 100 requests in a second. <b>Cap your thread pool at 8.</b> On a 429, <b>do not sleep for <code>Retry-After</code></b> — you would idle through minutes of working service. Poll a single cheap request every 30–45 s instead, and serve from cache or the open <code>/products.json</code> feeds meanwhile — a separate subsystem that stayed healthy all through the lockout. Cache searches by query string not to stay under quota, but so the demo survives if you trip it.</div>
+    </div>
+
+    <div class="con warn">
+      <h4>Two response-shape traps</h4>
+      <p>The payload is double-encoded — real content sits in <code>result.content[0].text</code> as a JSON <em>string</em>. And schema errors come back as <code>result.isError: true</code> with HTTP 200, not as JSON-RPC errors, so naive error handling will treat a rejected call as success.</p>
+      <div class="fix"><b>Response ·</b> Write one <code>call_ucp()</code> wrapper that double-decodes, strips the <code>ucp</code> block, and raises on <code>isError</code>. Everything else in the codebase goes through it. Do this in the first 20 minutes.</div>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <div class="shead">
+    <p class="slabel">Execution</p>
+    <h2 class="st">A 3.5-hour plan for four people</h2>
+    <p class="slede">The transaction path is the risky part and the part nobody has seen before, so it goes first and to one dedicated person. Everything else can absorb a slip.</p>
+  </div>
+
+  <div class="tl">
+    <div class="slot"><span class="stime">00:00 – 00:20</span><p class="swhat"><b>Everyone · the spike</b>Run the verified <code>search_catalog</code> curl from your own laptops before writing anything. Confirm the endpoint answers from venue Wi-Fi. If it does not, you have three hours to pivot to the open <code>products.json</code> feeds instead of twenty minutes.</p></div>
+    <div class="slot"><span class="stime">00:20 – 01:10</span><p class="swhat"><b>Dev A · the commerce client</b>The <code>call_ucp()</code> wrapper, then <code>search</code>, <code>resolve_size</code>, <code>create_cart</code>. Ship a script that goes from a query string to a printed <code>continue_url</code>. <span class="who">This is the critical path — protect it.</span></p></div>
+    <div class="slot"><span class="stime">00:20 – 01:10</span><p class="swhat"><b>Dev B · the agent loop</b>Gemini client, function declarations for A's four functions, plus <code>google_search</code> in the same tools array. Prompt for kit planning and slot-filling. Test against stub functions so you never block on A.</p></div>
+    <div class="slot"><span class="stime">00:20 – 01:10</span><p class="swhat"><b>Dev C · the interface</b>Streamlit chat shell, product-card component, running budget total. Build against hardcoded fixtures — real data lands later and should just slot in.</p></div>
+    <div class="slot"><span class="stime">01:10 – 02:00</span><p class="swhat"><b>Integrate</b>Swap B's stubs for A's real functions, feed C real products. First end-to-end run: description → questions → kit → cart link. <b>Target a working cart by 02:00</b>, which secures the top Progress milestone with 90 minutes still on the clock.</p></div>
+    <div class="slot"><span class="stime">02:00 – 02:20</span><p class="swhat"><b>Lock the repo down while the facts are fresh</b>Write <code>AGENTS.md</code>'s load-bearing-facts registry and the Makefile the moment the first cart succeeds — before parallel work spreads. See the stack spec. <span class="who">~20 min, and it stops four AI assistants each inventing their own architecture.</span></p></div>
+    <div class="slot"><span class="stime">02:20 – 02:50</span><p class="swhat"><b>Harden</b>Response caching. The out-of-stock path and the “too expensive, swap it” path — the two things judges probe. Budget arithmetic in code. Contract tests for the fragile shapes. Confirm <code>.env</code> is gitignored and nothing secret is in the history.</p></div>
+    <div class="slot"><span class="stime">02:50 – 03:10</span><p class="swhat"><b>Rehearse against adversaries</b>Run the four judge checks below, out loud, twice. Fix whatever breaks. Freeze the code.</p></div>
+    <div class="slot"><span class="stime">03:10 – 03:30</span><p class="swhat"><b>Narrative + buffer</b>Who says what. Open on Decathlon's <code>agents.md</code> — “this retailer published instructions <em>for agents</em>, so we built the agent it asked for” — and close on the judge opening the cart link on their own phone.</p></div>
+  </div>
+
+  <p class="note">If you finish early, the highest-value additions in order: <b>(1)</b> host your own UCP agent profile, <b>(2)</b> show search-grounding citations inline next to each gear rationale, <b>(3)</b> expose the concierge itself as an MCP server so another agent could shop through it.</p>
+</section>
+
+<section>
+  <div class="shead">
+    <p class="slabel">Proof</p>
+    <h2 class="st">How a judge verifies this in ninety seconds</h2>
+    <p class="slede">All four are deterministic and hostile to faking. Rehearse them; they are also exactly what an architecture reviewer will reach for.</p>
+  </div>
+
+  <div class="checks">
+    <div class="check"><p><b>Open the cart link.</b> The agent's final message contains a live decathlon.com cart URL. The judge opens it on their own device and sees the same items, sizes and prices. <span class="sc">— proves the transaction is real, not rendered</span></p></div>
+    <div class="check"><p><b>Click any product through to its page.</b> Price and size options match what the agent showed, because both came from the same call. <span class="sc">— proves catalog grounding</span></p></div>
+    <div class="check"><p><b>Demand an out-of-stock size.</b> Ask for a size the availability grid marks <code>available:false</code>. A correct agent refuses and offers the nearest in-stock size instead of cheerfully adding it. <span class="sc">— proves the stock guardrail, and is the single best adversarial test</span></p></div>
+    <div class="check"><p><b>Impose an absurd budget.</b> “Kit us both out for $40.” The agent must report that nothing fits rather than inventing a $12 tent. <span class="sc">— proves it is retrieving, not generating, products</span></p></div>
+  </div>
+
+  <p class="note"><b>Mapping to the rubric.</b> Progress (30 %) tops out at “knowledge tool integration,” which step 1's search grounding delivers directly. Technical Checklist (20 %) asks that components be <em>demonstrably</em> working — you can point at a planning loop, function calling, live external tools, structured output, a grounding guardrail and human-in-the-loop confirmation, each with a visible artifact. Innovation (30 %) rests on the honest claim that this is not a chatbot in front of a scraper: Decathlon published a protocol for agents, and you used it to transact.</p>
+</section>
+
+</div>
+
+<footer><div class="wrap">
+  <p class="foot"><b>Provenance — read this before trusting any line above.</b> Everything in the <b>Decathlon</b> sections was executed against the live UCP endpoint on 24 July 2026 from this machine: the handshake, all ten tool probes, the availability grid, the gendered and empty-query behaviour, the inventory survey, the Colombia shipping rejection, and the cart — which is one I actually created. The <b>Gemini</b> stack recommendations in Decision 02 and Decision 05 are <b>docs-derived and untested</b>; no key or SDK was available here, and model IDs move faster than docs. Smoke-test them first thing.</p>
+  <p class="foot" style="margin-top:10px">Undocumented and newly-published surfaces change without notice — re-run the step-01 spike from venue Wi-Fi before building on any of it. Rate limits, uptime and terms of use are not guaranteed by anything here.</p>
+</div></footer>
+
+<button id="tt" aria-label="Toggle light or dark theme"><span aria-hidden="true">◐</span><span id="ttl">Theme</span></button>
+<script>
+(function(){
+  var root=document.documentElement,btn=document.getElementById("tt"),lbl=document.getElementById("ttl");
+  function eff(){var a=root.getAttribute("data-theme");if(a)return a;
+    return window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}
+  function paint(){lbl.textContent=eff()==="dark"?"Dark":"Light";}
+  btn.addEventListener("click",function(){root.setAttribute("data-theme",eff()==="dark"?"light":"dark");paint();});
+  paint();
+})();
+</script>
