@@ -1,6 +1,5 @@
 """Preflight. Run this at 08:05 when four laptops need the same green state fast."""
 
-import os
 import pathlib
 import shutil
 import subprocess
@@ -24,13 +23,11 @@ check("cloudflared present", (ROOT / "bin" / "cloudflared").exists() or bool(shu
 check(".env present", (ROOT / ".env").exists())
 check(".env gitignored", ".env" in (ROOT / ".gitignore").read_text())
 
-try:
-    subprocess.run(["git", "-C", str(ROOT), "log", "--all", "-S", "GEMINI_API_KEY=AI", "--oneline"],
-                   capture_output=True, check=True, text=True)
-    leaked = subprocess.run(["git", "-C", str(ROOT), "ls-files", ".env"], capture_output=True, text=True).stdout
-    check("no .env in git", not leaked.strip())
-except Exception as e:
-    check("no .env in git", False, str(e))
+def git(*args: str) -> str:
+    return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True).stdout
+
+
+check("no .env tracked", not git("ls-files", ".env").strip())
 
 for mod, ver in [("reflex", "0.9.7"), ("google.genai", "2.14.0"), ("pydantic", None)]:
     try:
@@ -45,6 +42,8 @@ for line in (ROOT / ".env").read_text().splitlines() if (ROOT / ".env").exists()
     if line.startswith("GEMINI_API_KEY="):
         key = line.split("=", 1)[1].strip()
 check("GEMINI_API_KEY set", bool(key) and key != "your-key-here")
+if key:
+    check("key value never committed", not git("log", "--all", "-S", key, "--oneline").strip())
 
 if key:
     try:
