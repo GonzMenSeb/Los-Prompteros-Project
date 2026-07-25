@@ -98,12 +98,31 @@ def bubble(m: ChatMessage) -> rx.Component:
                 letter_spacing="0.1em",
                 color=rx.cond(is_user, MUTED, ACCENT),
             ),
-            rx.text(
-                m.content,
-                size="3",
-                color=TEXT,
-                white_space="pre-wrap",
-                line_height="1.65",
+            # The research and presentation stages answer in markdown — headings, bold,
+            # bullet lists — and `rx.text` renders the syntax literally, so the
+            # conditions report reached the demo screen as "### ... **Elevation**".
+            #
+            # User content is never handed to rx.markdown. Reflex's markdown pulls in
+            # rehype-raw, so passing untrusted text through it would let a typed
+            # <img onerror=...> reach the DOM. Plain text for the user, markdown only
+            # for our own model output.
+            #
+            # Known, benign: rx.markdown carries `useContext`, and rx.foreach hoists
+            # each bubble's hooks into the list render, so appending a message changes
+            # the parent's hook COUNT and React dev mode logs "change in the order of
+            # Hooks". Verified across a full walkthrough — 6 messages, 10 product cards,
+            # a created cart — with no render breakage. Reverting to rx.text silences it
+            # at the cost of literal "### " and "**" on the demo screen.
+            rx.cond(
+                is_user,
+                rx.text(m.content, size="3", color=TEXT, white_space="pre-wrap", line_height="1.65"),
+                rx.box(
+                    rx.markdown(m.content),
+                    color=TEXT,
+                    width="100%",
+                    font_size="var(--font-size-3)",
+                    line_height="1.65",
+                ),
             ),
             citations(m),
             spacing="2",

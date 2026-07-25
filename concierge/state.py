@@ -20,6 +20,7 @@ from typing import Any
 import reflex as rx
 from pydantic import BaseModel, Field
 
+from concierge import walkthrough
 from concierge.domain.models import CartResult, KitItem, minor_to_display
 from concierge.obs.trace import TraceEvent, bind_sink, emit
 from concierge.ui import demo_data
@@ -139,6 +140,12 @@ class State(rx.State):
     status: str = ""
     error: str = ""
 
+    walkthrough_phase: str = ""
+    walkthrough_step: int = 0
+    walkthrough_total: int = 0
+    walkthrough_label: str = ""
+    walkthrough_shows: str = ""
+
     @rx.var
     def cards(self) -> list[KitCard]:
         return [to_card(i) for i in self.kit_items]
@@ -192,6 +199,14 @@ class State(rx.State):
     @rx.var
     def substitution_count(self) -> int:
         return sum(1 for i in self.kit_items if i.size_substituted)
+
+    @rx.var
+    def walkthrough_active(self) -> bool:
+        return self.walkthrough_phase != ""
+
+    @rx.var
+    def walkthrough_progress(self) -> str:
+        return f"{self.walkthrough_step}/{self.walkthrough_total}"
 
     def _drain(self, sink: list[TraceEvent]) -> bool:
         if not sink:
@@ -350,7 +365,10 @@ class State(rx.State):
                 citations=[Citation(title=c.title, url=c.uri) for c in result.citations],
             )
         )
-        self.awaiting_confirmation = bool(self.kit_items) and result.offer_cart
+        # A redirect, a greeting or a failed turn produces no kit at all, and must not
+        # retract a standing cart offer: ask about swimming after the kit is built and
+        # the confirm button would vanish for the rest of the session.
+        self.awaiting_confirmation = bool(self.kit_items) and (result.offer_cart or result.kit is None)
         yield
 
     @rx.event
@@ -404,4 +422,72 @@ class State(rx.State):
             bind_sink(None)
             self.is_thinking = False
             self.status = ""
+        yield
+
+    @rx.event
+    async def on_page_load(self):
+        """`make walkthrough` opens the page with `?walkthrough=<phase>` so the demo
+        starts with no click at all.
+
+        Gated on the query parameter rather than on the load itself: a plain visit to
+        `/` must never restart the script, or a stray refresh mid-pitch would wipe a
+        kit that took three minutes of live calls to build.
+
+        `router.url.query_parameters` — `router.page` is deprecated in 0.9.x and slated
+        for removal in 1.0.
+        """
+        phase = self.router.url.query_parameters.get("walkthrough", "").strip().lower()
+        if phase in ("prewarm", "onstage", "all"):
+            async for _ in self.run_walkthrough("" if phase == "all" else phase):
+                yield
+
+    @rx.event
+    async def run_walkthrough(self, phase: str = ""):
+        """The scripted demo, driven through the same handlers a human clicks.
+
+        `phase` is "prewarm", "onstage", or "" for the whole script. Only the whole
+        script and the prewarm start from a clean slate — "onstage" deliberately keeps
+        the kit the prewarm built, because that kit IS the thing being probed.
+        """
+        if self.is_thinking or self.walkthrough_phase:
+            return
+
+        script = walkthrough.beats(phase or None)
+        if not script:
+            return
+        if phase != "onstage":
+            self.clear()
+
+        self.walkthrough_phase = phase or "all"
+        self.walkthrough_total = len(script)
+        yield
+
+        try:
+            for step, beat in enumerate(script, 1):
+                self.walkthrough_step = step
+                self.walkthrough_label = beat.label
+                self.walkthrough_shows = beat.shows
+                yield
+                await asyncio.sleep(walkthrough.PAUSE_SECONDS)
+
+                if beat.message:
+                    async for _ in self.send_message({"message": beat.message}):
+                        yield
+                elif self.awaiting_confirmation:
+                    async for _ in self.confirm_cart():
+                        yield
+                else:
+                    # The cart beat with no standing offer means an earlier beat
+                    # failed. Say so rather than ending on a silent no-op.
+                    self.error = (
+                        "The walkthrough reached the cart step with nothing to buy — the kit "
+                        "never built. Run the prewarm phase first, or check the trace panel."
+                    )
+                yield
+        finally:
+            self.walkthrough_phase = ""
+            self.walkthrough_step = 0
+            self.walkthrough_total = 0
+            self.walkthrough_label = ""
+            self.walkthrough_shows = ""
         yield

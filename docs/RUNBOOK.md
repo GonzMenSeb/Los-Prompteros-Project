@@ -7,7 +7,31 @@ Print this. Write the two tunnel URLs on it by hand.
 ```bash
 make doctor      # python, .env, key valid, gemini-3.6-flash present, both endpoints reachable
 make check       # offline suite
+make rehearse    # the scripted walkthrough, live, no browser — asserts every beat
 ```
+
+## The scripted walkthrough
+
+The pitch is two minutes; the demo gets about **thirty seconds on camera**. A real run
+does not fit — turn one alone is **52 s** of Gemini latency — so the script has two
+phases and you choose when the second one fires. Both are live.
+
+```bash
+make walkthrough                 # locally: fresh server, browser opened, script running
+make walkthrough PHASE=onstage
+```
+
+**Run `1 · Prewarm the trip` while you are still on the problem statement.** ~3 min:
+swim refusal, grounded research with citations, targeted questions, then a real kit —
+10 items, photos, resolved sizes, running budget, substitutions disclosed, slots
+honestly marked unservable. **Hit `2 · Go live` when the audience is looking.** ~25 s:
+injection blocked with every price unmoved, then the real cart. Then open the link.
+
+Prewarming is not cheating: the kit on screen was built live, in the same session,
+minutes earlier. What happens on camera happens as they watch.
+
+Under tunnels, use `make tunnel` (below) and click the buttons on the judge URL —
+`make walkthrough` restarts the server and would invalidate the compiled `api_url`.
 
 ## Bring the demo up — ORDER IS CRITICAL
 
@@ -50,11 +74,13 @@ in the trace panel, the agent carries on unbothered).
 
 ## Contingencies
 
-- **429 from MCP** → **do not touch the network or the tunnels.** Keep talking; the
-  kit still renders from the storefront feeds, which are a separate surface and stay
-  healthy. Retry the cart every ~30 s — access returns in ~4 minutes, `Retry-After`
-  overstates it, and retrying does **not** extend the lockout. **Never sleep the
-  advertised interval.**
+- **429 from MCP** → **do not touch the network or the tunnels, and do not stall
+  waiting for it to clear — a lockout is ~48 minutes, not ~4** (re-measured 25 Jul;
+  the old 4-minute figure was wrong). `ucp.py` latches into paced mode on the first
+  `429` and retries once, spaced, and **spaced calls are served mid-lockout** — so
+  keep going and narrate that it is deliberately slowing itself down. Retrying does
+  **not** extend the lockout. Never sleep `Retry-After`, and never treat one
+  successful call as proof it cleared: single calls succeed throughout.
 - **MCP down entirely** → the live collection feeds still render the whole kit; only
   the cart link is lost. Say so and show the kit.
 - **Frontend tunnel dies** → present from `localhost:3000` on the laptop screen.

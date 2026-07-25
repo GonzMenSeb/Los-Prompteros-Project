@@ -54,7 +54,29 @@ can run against us.
 
 ## Rate limits
 
-`asyncio.Semaphore(8)`. Clean at 20 sequential / 40 concurrent; **100 concurrent
-trips a ~4 minute lockout**. On `UcpRateLimited`, **never sleep for `Retry-After`** —
-it overstates recovery by minutes. Poll one cheap call every 30–45 s and keep
-rendering from the storefront feeds, which are a separate surface and stay healthy.
+`asyncio.Semaphore(8)`. Clean at 20 sequential / 40 concurrent from a rested bucket;
+**100 concurrent trips a ~48 MINUTE lockout** (re-measured 25 Jul 2026 — `SPEC.md
+§3.2`'s "~4 minutes" is the superseded first probe).
+
+The first `429` latches `ucp.py` into **paced mode** for the rest of the process:
+serialised, `PACE_SECONDS` (1.5 s) apart, because mid-lockout a burst of 3–4 re-trips
+the limiter instantly while a trickle is served normally. `call_ucp` retries once at
+that spacing, so **`UcpRateLimited` means even a trickle was refused.** Pacing never
+un-latches on a success — a single call succeeds throughout a lockout, so a success
+is not recovery, and neither is a one-call poll. `Retry-After` is honest and ~48
+minutes out: there is nothing worth sleeping for.
+
+The storefront feeds are a separate surface and stay healthy throughout — and since
+`resolve_variant` now resolves off the feed, **a lockout no longer costs the kit at
+all.** `create_cart` is the only MCP call left in a demo run, so a lockout costs the
+cart link and nothing else.
+
+## Why resolution is feed-first
+
+The feed's numeric variant id **is** the MCP variant GID (verified in both fixtures:
+`41919445434430` / `"Dark Cinnamon / 6.5"`), and the collection feed's `available`
+cross-checks against `get_product` exactly. The three-call grid walk therefore bought
+nothing and cost everything: 3 calls × 8 slots is a ~24-request burst, and that is
+what tripped the limiter on 25 Jul. `_resolve_via_mcp` survives for a product the feed
+hands over with no variants — do not delete it; it encodes the `available: null`
+behaviour that makes a non-empty partial selection mandatory.

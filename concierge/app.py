@@ -1,7 +1,7 @@
 import reflex as rx
 
 from concierge.state import State
-from concierge.ui import cart, chat, product, trace_panel
+from concierge.ui import cart, chat, product, trace_panel, walkthrough
 from concierge.ui.theme import (  # noqa: F401
     ACCENT,
     ACCENT_DIM,
@@ -84,6 +84,7 @@ def header() -> rx.Component:
 def main_column() -> rx.Component:
     return rx.vstack(
         cart.fixture_ribbon(),
+        walkthrough.walkthrough_bar(),
         chat.chat_panel(),
         cart.error_block(),
         product.kit_grid(),
@@ -131,4 +132,4 @@ app = rx.App(
     stylesheets=["https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"],
     style={"background": BG, "color": TEXT, "font_family": FONT},
 )
-app.add_page(index, route="/", title="Expedition Concierge")
+app.add_page(index, route="/", title="Expedition Concierge", on_load=State.on_page_load)

@@ -22,6 +22,13 @@ from tests.conftest import PRODUCT_GID, VARIANT_GID, load
 FACTS = 'AGENTS.md "load-bearing facts" (SPEC.md §3)'
 BASE = "https://www.decathlon.com"
 
+# Measured 25 Jul 2026, and it contradicts SPEC.md §3.2: recovery from a trip is
+# ~48 MINUTES, not ~4, and Retry-After counts DOWN in real time to a fixed unlock
+# rather than overstating it. A single call succeeds throughout the lockout, so a
+# one-call poll proves only that the bucket holds one token — it is NOT a readiness
+# signal. A burst of 3-4 re-trips instantly; a trickle is tolerated.
+_SPACING = 1.5
+
 SHIPPED_HANDLES = [
     "hiking-boots",
     "hiking-womens-boots",
@@ -60,21 +67,33 @@ async def _probe() -> dict[str, Any]:
     catalog_arg = {"catalog": {"id": PRODUCT_GID, "context": CONTEXT}}
 
     async with httpx.AsyncClient(timeout=45, headers={"Content-Type": "application/json"}) as raw:
-        r = await raw.post(EP, json=_rpc("get_product", catalog_arg))
-        out["get_product_status"] = r.status_code
-        out["get_product_envelope"] = r.json() if r.status_code != 429 else None
-        if r.status_code == 429:
-            out["rate_limited"] = True
 
-        r = await raw.post(EP, json=_rpc("get_product", catalog_arg, profile_in_params=True))
+        async def post(payload: dict) -> httpx.Response:
+            """Space the calls out. A burst of 3-4 re-trips the limiter while a
+            trickle is tolerated, and a trip costs ~48 minutes (measured), so the
+            few seconds this adds are the cheapest insurance in the repo."""
+            await asyncio.sleep(_SPACING)
+            resp = await raw.post(EP, json=payload)
+            if resp.status_code == 429:
+                out["rate_limited"] = True
+            return resp
+
+        r = await post(_rpc("get_product", catalog_arg))
+        out["get_product_status"] = r.status_code
+        out["get_product_envelope"] = None if out["rate_limited"] else r.json()
+
+        r = await post(_rpc("get_product", catalog_arg, profile_in_params=True))
         out["bad_profile_status"] = r.status_code
         out["bad_profile_body"] = r.json()
 
         bad_line = {"cart": {"line_items": [{"merchandise_id": VARIANT_GID, "quantity": 1}], "context": CONTEXT}}
-        r = await raw.post(EP, json=_rpc("create_cart", bad_line))
+        r = await post(_rpc("create_cart", bad_line))
         out["bad_cart_status"] = r.status_code
         out["bad_cart_body"] = r.json()
 
+        # The storefront feed is a SEPARATE surface that stays healthy through an
+        # MCP lockout, so it is fetched unconditionally and its tests take `live`
+        # rather than `mcp` — they still run when the MCP half is locked out.
         for key, url in (
             ("collections", f"{BASE}/collections.json?limit=250"),
             ("empty_collection", f"{BASE}/collections/bike-helmet/products.json?limit=12"),
@@ -84,23 +103,30 @@ async def _probe() -> dict[str, Any]:
             fr.raise_for_status()
             out[key] = fr.json()
 
+    if out["rate_limited"]:
+        return out
+
+    async def tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
+        await asyncio.sleep(_SPACING)
+        return await call_ucp(name, args)
+
     try:
-        # created at quantity 2 so the update below can prove REPLACE, not append
+        # created at quantity 2 so the update below can prove REPLACE, not a no-op
         good_line = {"cart": {"line_items": [{"item": {"id": VARIANT_GID}, "quantity": 2}], "context": CONTEXT}}
-        out["cart"] = await call_ucp("create_cart", good_line)
+        out["cart"] = await tool("create_cart", good_line)
         cart_id = out["cart"]["id"]
-        out["get_cart"] = await call_ucp("get_cart", {"id": cart_id, "context": CONTEXT})
-        out["update_cart"] = await call_ucp(
+        out["get_cart"] = await tool("get_cart", {"id": cart_id, "context": CONTEXT})
+        out["update_cart"] = await tool(
             "update_cart",
             {
                 "id": cart_id,
                 "cart": {"line_items": [{"item": {"id": VARIANT_GID}, "quantity": 1}], "context": CONTEXT},
             },
         )
-        out["search_short"] = await call_ucp(
+        out["search_short"] = await tool(
             "search_catalog", {"catalog": {"query": "sleeping bag", "context": CONTEXT, "pagination": {"limit": 10}}}
         )
-        out["search_long"] = await call_ucp(
+        out["search_long"] = await tool(
             "search_catalog",
             {"catalog": {"query": "sleeping bag 0 degrees celsius", "context": CONTEXT, "pagination": {"limit": 10}}},
         )
@@ -120,7 +146,11 @@ def live() -> dict[str, Any]:
 @pytest.fixture(scope="module")
 def mcp(live) -> dict[str, Any]:
     if live["rate_limited"]:
-        pytest.skip("UCP rate limited — a lockout is not a contract violation. Retry in ~4 minutes.")
+        pytest.skip(
+            "UCP rate limited — a lockout is not a contract violation. Recovery is ~48 minutes "
+            "(measured; SPEC.md §3.2's '~4 minutes' is wrong). Do NOT poll with a single call to "
+            "decide it has cleared: one call succeeds throughout the lockout."
+        )
     return live
 
 
@@ -276,7 +306,7 @@ def test_long_query_returns_zero(mcp):
 
 
 @pytest.mark.live
-def test_collection_handles_resolve(mcp):
+def test_collection_handles_resolve(live):
     handles = {c["handle"] for c in mcp["collections"]["collections"]}
     assert len(handles) >= 200, f"Collection count collapsed to {len(handles)}. {FACTS} says 228."
 
@@ -293,7 +323,7 @@ def test_collection_handles_resolve(mcp):
 
 
 @pytest.mark.live
-def test_empty_collection_is_legal(mcp):
+def test_empty_collection_is_legal(live):
     assert mcp["empty_collection"]["products"] == [], (
         f"'bike-helmet' now returns products. {FACTS} says a collection can exist and be empty,\n"
         "  which is why check_coverage() marks the slot unservable instead of erroring. Pick another\n"
@@ -302,7 +332,7 @@ def test_empty_collection_is_legal(mcp):
 
 
 @pytest.mark.live
-def test_feed_prices_are_major_unit_strings(mcp):
+def test_feed_prices_are_major_unit_strings(live):
     variants = [v for p in mcp["stocked_collection"]["products"] for v in p["variants"]]
     assert variants
     for v in variants[:20]:

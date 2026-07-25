@@ -70,3 +70,68 @@ empirically with a `reflex run` smoke test.
 clean bolt-on: a new `analytics/` package plus one hook at session close. It is
 not on the demo's critical path, so it lands after the working end-to-end demo
 is committed.
+
+### 2026-07-25 · `ucp.py` latches into paced mode on the first 429
+
+Re-measuring the rate limit produced a different answer from the first probe:
+recovery is **~48 minutes, not ~4**, `Retry-After` is honest and counts down in
+real time, and a single call succeeding proves nothing because single calls
+succeed throughout a lockout. So the old advice — poll one cheap call every
+30–45 s and wait it out — was wrong twice over.
+
+What the measurement does support is that a **trickle is served mid-lockout while
+a burst of 3–4 re-trips it instantly.** Pacing is therefore the only useful
+response: the first `429` serialises every later call and spaces it by
+`PACE_SECONDS`, `call_ucp` retries once at that spacing, and `UcpRateLimited` now
+means *even a trickle was refused*. Pacing never un-latches on a success, because
+a success is not recovery.
+
+### 2026-07-25 · `resolve_variant` resolves off the storefront feed, not MCP
+
+The three-call grid walk (`labels` → partial-selection grid → full selection) is
+correct and was verified live, but it fires **3 MCP calls per product**, and a
+kit is 6–8 products. That ~24-request burst is what tripped the rate limiter
+during a live end-to-end run on 25 Jul — the kit died at the last slot and
+recovery was 25 minutes.
+
+The walk turned out to be unnecessary. The collection feed already carries every
+variant's id, title, price and stock flag; the registry already recorded that its
+`available` cross-checks against `get_product` exactly; and the feed's numeric
+variant id **is** the MCP variant GID — verified in both dumped fixtures, now
+pinned by `test_the_feed_variant_id_is_the_mcp_variant_gid`. So resolution runs
+off data already in hand, at **zero MCP calls**, and `create_cart` is the only MCP
+call left in a demo run. Turn 2 loses ~10 s and the kit stops depending on a
+surface that can lock us out for 48 minutes.
+
+`_resolve_via_mcp` is kept, unchanged, for a product the feed hands over with no
+variants. It encodes the `available: null` behaviour that makes a non-empty
+partial selection mandatory, and that knowledge is expensive to rediscover.
+
+Two things the feed forced into the open. A variant `title` is the option values
+joined by `" / "`, but an option *value* may itself contain a slash — the MT500
+bag has two options and three parts — so positional splitting is trusted only
+when the part count equals the option count. And because the same size exists in
+several colours, an exact available match in a later colour is preferred over the
+nearest size in the first one; otherwise the agent discloses a substitution that
+never happened.
+
+### 2026-07-25 · The scripted walkthrough is two phases, not one
+
+The pitch is two minutes, so the demo gets about thirty seconds on camera. A real
+run does not fit: measured, turn one alone is **52 s** of Gemini latency
+(classify 12.5, research 9.8, profile 14.2, slots 11.5, questions 4.1). Squeezing
+it would mean cutting the grounded research or the questions — both scored — or
+replaying a recording, which is what `CONCIERGE_FIXTURE_MODE` already is and what
+the whole project exists not to do.
+
+So `walkthrough.SCRIPT` is split. **Prewarm** (trip description, answers) runs the
+slow real work while the pitch is still on the problem statement. **Onstage**
+(injection blocked, honest refusal, cart click) is fast — the intent gate
+short-circuits before research and `create_cart` is one call — and is what the
+audience watches happen. The kit being probed was built live, in the same
+session, minutes earlier.
+
+This surfaced a real bug: a redirect turn produced no kit and
+`awaiting_confirmation` was recomputed from `result.offer_cart` alone, so asking
+about swimming after the kit was built retracted the cart offer for the rest of
+the session. A turn that produces no kit at all now leaves a standing offer alone.

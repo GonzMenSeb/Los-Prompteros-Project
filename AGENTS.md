@@ -59,13 +59,30 @@ the build. If live behaviour really changed, update this registry and
 
 ### Rate limits
 
-- Clean at **20 sequential** and **40 concurrent** (~0.5 s each).
-- **100 concurrent trips it**: 85 % return `429`. Recovery is **~4 minutes**.
-- **Never sleep for `Retry-After`** — it overstates recovery by minutes. Poll one
-  cheap request every 30–45 s and serve from cache meanwhile. Retrying during
-  lockout does **not** extend it.
+Re-measured **25 Jul 2026**, and the numbers moved. `SPEC.md §3.2` and
+`tests/test_contracts.py` carry the same corrected figures — the first probe's
+"~4 minutes" was wrong.
+
+- Clean at **20 sequential** and **40 concurrent** (~0.5 s each) from a rested bucket.
+- **100 concurrent trips it**: 85 % return `429`.
+- **Recovery is ~48 MINUTES, not ~4.** Plan the demo around 48. A trip is expensive
+  enough that the rate-limit contract tests deliberately never induce one.
+- **`Retry-After` is honest.** It counts down in real time to a fixed unlock instant.
+  It does not overstate recovery — that earlier claim was an artifact of believing
+  recovery took 4 minutes. There is still nothing to sleep for: 48 minutes.
+- **A single call succeeds throughout the lockout**, so a one-call poll proves only
+  that the bucket holds one token — **it is not a readiness signal.** Never use one
+  to decide the lockout has cleared.
+- Mid-lockout a **burst of 3–4 re-trips it instantly**; a **trickle ~1.5 s apart is
+  served normally.** `ucp.py` therefore latches into paced mode on the first `429`
+  (serialised, `PACE_SECONDS` apart) and **never un-latches on a success** — a
+  success is not recovery. One spaced retry happens inside `call_ucp`, so
+  `UcpRateLimited` means *even a trickle was refused*.
+- Retrying during lockout does **not** extend it.
 - The **storefront JSON endpoints are a separate surface** and stay healthy through
-  an MCP lockout. When MCP is locked out the kit still renders; only the cart is lost.
+  an MCP lockout. They carry the catalog and stock flags, but **not variant GIDs the
+  cart accepts** — `resolve_variant` needs MCP `get_product`, so a lockout degrades
+  the kit to trickle speed rather than leaving it untouched.
 
 ### Catalog & retrieval  (`concierge/commerce/catalog.py`)
 
@@ -93,6 +110,31 @@ the build. If live behaviour really changed, update this registry and
   products; `"sleeping bag 0 degrees celsius"` → **0**. Keyword fallback must use
   1–3 word noun phrases; conditions and specifications belong in the *selection*
   step, never in the query.
+- **The feed's numeric variant id IS the MCP variant GID.** Verified in both dumped
+  fixtures: the feed's `41919445434430` / `"Dark Cinnamon / 6.5"` is `get_product`'s
+  `gid://shopify/ProductVariant/41919445434430` / `"Dark Cinnamon / 6.5"`. Pinned by
+  `test_the_feed_variant_id_is_the_mcp_variant_gid` — **if that test ever fails,
+  feed-first resolution is invalid and must revert to the grid walk.**
+- **`resolve_variant` therefore resolves off the feed at ZERO MCP calls.** The feed
+  already carries every variant's id, title, price and a trustworthy stock flag, so
+  the three-call grid walk bought nothing and cost the demo: 3 calls × 8 slots is a
+  ~24-request burst, and **that is what tripped the rate limiter on 25 Jul.**
+  `_resolve_via_mcp` is kept for a product the feed hands over with no variants at
+  all, because it is the path proven against live `available: null` behaviour.
+  **`create_cart` is now the only MCP call in a demo run.**
+- **Sizes arrive phrased the way the customer said them** — `"US 10.5"`, `"men's L"`,
+  `"size 8"` — while feed labels are bare (`"10.5"`, `"L"`). `_clean_request` strips
+  that noise before matching. Without it nothing matched and `_choose_size` fell
+  through to its last resort, "first available, flagged as a substitution": observed
+  live on 25 Jul handing a **US 10.5 request a 6.5 while 10.5 was in stock**, and
+  flagging in-stock exact matches as substitutions. Numbers are extracted from
+  anywhere in the *request* (`_num_in`) but a *label* counts as numeric only when it
+  is nothing but a number (`_num`) — otherwise `"Dark Cinnamon / 6.5"` reads as 6.5.
+- **A feed variant `title` is the option values joined by `" / "`** in `option_names`
+  order — but **an option VALUE may itself contain a slash.** The MT500 bag has two
+  options and three parts: `"Smoked Black / M / 5'2\"–5'5\""`. Positional splitting is
+  trusted **only when part count equals option count**; otherwise match the whole
+  title. Slicing blindly matches a size request against a height range.
 
 ### Gemini  (`concierge/agent/`)
 

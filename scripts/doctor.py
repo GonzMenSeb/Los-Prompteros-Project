@@ -69,7 +69,7 @@ try:
                                                       "catalog": {"query": "tent", "context": CONTEXT,
                                                                   "pagination": {"limit": 1}}}}}, timeout=45)
     check("UCP MCP endpoint", r.status_code == 200 and "result" in r.json(),
-          "429 = rate limited, ~4min" if r.status_code == 429 else str(r.status_code))
+          "429 = rate limited, ~48min — demo still works, paced" if r.status_code == 429 else str(r.status_code))
 except Exception as e:
     check("UCP MCP endpoint", False, str(e)[:80])
 

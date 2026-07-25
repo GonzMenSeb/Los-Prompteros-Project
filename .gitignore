@@ -32,3 +32,12 @@ bin/
 # Reflex
 .states/
 reflex.lock/
+
+# Playwright MCP run artifacts
+.playwright-mcp/
+
+# Walkthrough dev-server log
+.reflex-walkthrough.log
+
+# Quick-tunnel logs and the ephemeral judge URLs
+.tunnel/

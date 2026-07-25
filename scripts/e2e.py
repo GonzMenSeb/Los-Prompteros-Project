@@ -68,14 +68,16 @@ async def main() -> None:
         print(f"lines={res.line_count}  total={minor_to_display(res.total_minor)}")
         print("=" * 72)
     else:
-        print("(no kit this turn — awaiting answers)")
-        print("awaiting_confirmation:", result.awaiting_confirmation)
+        print("(no kit this turn)")
+        print("stage:", result.stage, " offer_cart:", result.offer_cart)
+        print("error:", result.error or "(none)")
 
     print()
     print("-- trace --")
-    for ev in recent(60):
+    for ev in recent(200):
         mark = {"guardrail": "[G]", "error": "[E]"}.get(ev.level, "   ")
-        print(f"  {mark} {ev.event}")
+        detail = f"  {ev.payload}" if ev.level in ("guardrail", "error") else ""
+        print(f"  {mark} {ev.event}{detail[:400]}")
 
     await catalog.aclose()
 

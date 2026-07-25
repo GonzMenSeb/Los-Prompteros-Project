@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from concierge.agent import prompts, tools
 from concierge.agent.classify import MODEL, classify, generate
-from concierge.domain.guardrails import check_budget, check_substitution, scrub_prose
+from concierge.domain.guardrails import check_budget, check_stock, check_substitution, scrub_prose
 from concierge.domain.models import (
     ActivityProfile,
     CatalogProduct,
@@ -505,39 +505,42 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
         else:
             requests = [None] * max(1, min(int(pick.quantity or party), party, 6))
 
-        grouped: dict[str, tuple[Any, int]] = {}
+        by_variant: dict[str, tuple[Any, int]] = {}
         for want in requests:
             resolved = await backend.resolve_variant(product, want)
             if resolved is None:
                 continue
-            prev = grouped.get(resolved.variant_gid)
-            grouped[resolved.variant_gid] = (resolved, (prev[1] if prev else 0) + 1)
+            prev = by_variant.get(resolved.variant_gid)
+            by_variant[resolved.variant_gid] = (resolved, (prev[1] if prev else 0) + 1)
 
-        if not grouped:
+        if not by_variant:
             emit("guardrail.out_of_stock", {"slot": pick.slot, "handle": product.handle}, level="guardrail")
             unservable.append(pick.slot)
             continue
 
-        for resolved, qty in grouped.values():
-            try:
-                items.append(
-                    KitItem(
-                        slot=pick.slot,
-                        product_title=product.title,
-                        product_url=product.product_url,
-                        image_url=product.image_url,
-                        variant_id=resolved.variant_gid,
-                        size_label=resolved.size_label,
-                        price_minor=resolved.price_minor,
-                        quantity=qty,
-                        available=True,
-                        size_substituted=resolved.substituted,
-                        rationale=pick.rationale[:300],
-                    )
-                )
-            except ValidationError as exc:
-                emit("guardrail.item_rejected", {"handle": product.handle, "error": str(exc)[:200]}, level="error")
-                unservable.append(pick.slot)
+        # check_stock owns item construction so a rejection lands as a guardrail
+        # verdict with a reason, not as a ValidationError the UI reads as a fault.
+        verdict = check_stock(
+            [
+                {
+                    "slot": pick.slot,
+                    "product_title": product.title,
+                    "product_url": product.product_url,
+                    "image_url": product.image_url,
+                    "variant_id": resolved.variant_gid,
+                    "size_label": resolved.size_label,
+                    "price_minor": resolved.price_minor,
+                    "quantity": qty,
+                    "available": resolved.available,
+                    "size_substituted": resolved.substituted,
+                    "rationale": pick.rationale[:300],
+                }
+                for resolved, qty in by_variant.values()
+            ]
+        )
+        items.extend(verdict.items)
+        if verdict.rejected:
+            unservable.append(pick.slot)
 
     items = _merge_variants(items)
     filled = {i.slot for i in items}

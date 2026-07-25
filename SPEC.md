@@ -89,12 +89,16 @@ Every line below was executed against the live services. **These look like bugs 
 
 ### 3.2 Rate limits
 
-- Clean at **20 sequential** and **40 concurrent** (~0.5 s each).
+**Re-measured 25 Jul 2026. The first probe's recovery figure was wrong and is corrected below** — `AGENTS.md` and `tests/test_contracts.py` carry the same numbers.
+
+- Clean at **20 sequential** and **40 concurrent** (~0.5 s each) from a rested bucket.
 - **100 concurrent trips it**: 85 % return `429`.
-- Recovery is **~4 minutes**, and `Retry-After` **overstates it by minutes** — it advertised 305 s remaining at the moment access actually returned. Behaviour is consistent with a token bucket refilling gradually.
+- Recovery is **~48 MINUTES**. ~~"~4 minutes"~~ was the first probe's reading and it was wrong; a trip is expensive enough that the contract tests now deliberately never induce one.
+- `Retry-After` **is honest** — it counts down in real time to a fixed unlock instant. The earlier "overstates it by minutes" note (305 s advertised at the moment access returned) was an artifact of believing recovery took 4 minutes. This is a fixed unlock, not a bucket refilling gradually.
 - Retrying during lockout does **not** extend it.
-- **Never sleep for `Retry-After`.** Poll a single cheap request every 30–45 s and serve from cache meanwhile.
-- The **storefront JSON endpoints are a separate surface** and stayed healthy throughout an induced MCP lockout.
+- **Never sleep for `Retry-After`** — 48 minutes. And **never poll to detect recovery:** a single call succeeds *throughout* the lockout, so a success proves only that the bucket holds one token. It is not a readiness signal.
+- Mid-lockout a **burst of 3–4 re-trips it instantly**, while a **trickle ~1.5 s apart is served normally.** Hence §4.1's paced mode.
+- The **storefront JSON endpoints are a separate surface** and stayed healthy throughout an induced MCP lockout. They do not carry cart-usable variant GIDs, so a lockout degrades size resolution to trickle speed rather than leaving the kit untouched.
 
 ### 3.3 Catalog & retrieval
 
@@ -167,7 +171,7 @@ async def call_ucp(tool: str, args: dict) -> dict:
     return data
 ```
 
-On `UcpRateLimited`: do **not** sleep the advertised interval. Poll one cheap call every 30–45 s; access returns in ~4 minutes. Serve cached results and keep rendering from the storefront feeds meanwhile.
+The first `429` latches **paced mode** for the rest of the process: calls serialised and `PACE_SECONDS` (1.5 s) apart, because mid-lockout a burst of 3–4 re-trips the limiter while a trickle is served normally (§3.2). `call_ucp` retries once at that spacing, so **`UcpRateLimited` means even a trickle was refused.** Pacing never un-latches on a success — a single call succeeds throughout a lockout, so a success is not recovery. Do **not** sleep the advertised interval (48 minutes) and do **not** poll to detect recovery. Serve cached results and keep rendering from the storefront feeds meanwhile.
 
 ### 4.2 Tool payloads
 
@@ -623,7 +627,7 @@ Two more a judge may reach for, both of which we should welcome: **ask for swimm
 
 Write these in `docs/RUNBOOK.md` and on paper before presenting.
 
-- **429 from MCP** → **do not touch the network or the tunnels.** Keep talking; the kit still renders from the storefront feeds, which are a separate surface and stay healthy. Retry the cart every ~30 s — access returns in ~4 minutes, `Retry-After` overstates it, and retrying does not extend the lockout.
+- **429 from MCP** → **do not touch the network or the tunnels, and do not wait for it to clear: it is ~48 minutes.** `ucp.py` has already latched into paced mode and retried; keep going. Spaced calls are served mid-lockout, so the kit still builds and the cart still creates — just slowly. Retrying does not extend the lockout.
 - **MCP endpoint down entirely** → the live collection feeds still render the whole kit; only the cart link is lost. Say so and show the kit.
 - **Frontend tunnel dies** → present from `localhost:3000` on the laptop screen.
 - **Backend tunnel dies** → the local page is dead too, because `api_url` is now stale. Redo §9.2 steps 1–3, or keep a second `rxconfig` pinned to `http://localhost:8000` and recompile.

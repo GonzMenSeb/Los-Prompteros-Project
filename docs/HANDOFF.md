@@ -15,7 +15,46 @@ make dev            # reflex run (ports 3000 frontend / 8000 backend, pinned)
 make tunnel         # both cloudflare tunnels in the order that works
 PYTHONPATH=. ./.venv/bin/python scripts/e2e.py        # full CLI end-to-end
 PYTHONPATH=. ./.venv/bin/python scripts/spike_cart.py hiking-boots --size 10.5
+PYTHONPATH=. ./.venv/bin/python scripts/verify_walkthrough.py   # rehearse, no browser
 ```
+
+---
+
+## Running the demo
+
+The pitch is two minutes, so the demo gets about **thirty seconds on camera**. A real
+run does not fit in thirty seconds — measured, turn one alone is **52 s** of Gemini
+latency — so `concierge/walkthrough.py` splits the script in two. Both phases are
+live; neither is mocked. `CONCIERGE_FIXTURE_MODE` is the fake and it says so on screen.
+
+```bash
+make walkthrough                 # prewarm: kills strays, waits for compile, opens the
+                                 # browser, and the script starts on its own
+make walkthrough PHASE=onstage   # the on-camera phase
+make walkthrough PHASE=all       # end to end
+make rehearse                    # same script, no browser, asserts every beat
+```
+
+`make walkthrough` opens `localhost:3000/?walkthrough=<phase>`, and **the query
+parameter is what starts it** — a plain visit to `localhost:3000` will not restart the
+script, so a stray refresh mid-pitch cannot wipe a kit that took three minutes of live
+calls to build.
+
+1. **`1 · Prewarm the trip`** — hit it while the pitch is still on the problem
+   statement. **~2.8 min.** Swim refusal, grounded research with citations, targeted
+   questions, then a real kit: 10 items, ~$1,160, photos, resolved sizes, running
+   budget, substitutions disclosed, two slots honestly marked unservable.
+2. **`2 · Go live`** — hit it when the audience is looking. Injection blocked with the
+   kit and every price unmoved, then the real cart.
+3. **Open the cart link.** That is the proof. Hand the phone over.
+
+Rehearse the whole thing headless with `scripts/verify_walkthrough.py`; it asserts
+every beat and prints the wall clock per phase.
+
+**Killing a stale dev server needs two patterns.** The frontend is a detached
+`react-router dev` node process under `.web/` that survives killing the reflex
+supervisor and keeps port 3000. And never type a `pkill -f 'reflex run'` inline — the
+pattern matches the invoking shell's own command line and kills the caller.
 
 ---
 

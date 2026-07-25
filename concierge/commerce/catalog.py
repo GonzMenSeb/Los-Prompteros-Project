@@ -232,6 +232,39 @@ def _num(s: str) -> float | None:
     return float(m.group(1)) if m else None
 
 
+# The model writes sizes the way the customer said them — "US 10.5", "men's L",
+# "size 8" — while feed labels are bare ("10.5", "L"). Unstripped, none of them
+# match, and `_choose_size` falls through to "first available, flagged as a
+# substitution": a US 10.5 request came back as a 6.5 with 10.5 in stock.
+_SIZE_NOISE = re.compile(
+    r"(?:\b|^)(?:us|uk|eu|eur|men(?:'s|s)?|women(?:'s|s)?|size[sd]?|shoe[s]?)(?:\b|$)", re.I
+)
+
+
+# Labels are letter codes; customers say words. "Large" matched nothing and fell to
+# the last resort, which flags a substitution that did not happen.
+_GARMENT_ALIASES = {
+    "extra small": "xs", "x small": "xs", "xsmall": "xs",
+    "small": "s", "medium": "m", "large": "l",
+    "extra large": "xl", "x large": "xl", "xlarge": "xl",
+    "2x": "xxl", "2xl": "xxl", "double extra large": "xxl",
+}
+
+
+def _clean_request(requested: str) -> str:
+    """Never splits on the apostrophe: "women's S" would yield a stray "s" that is
+    indistinguishable from the garment size S."""
+    out = re.sub(r"\s+", " ", _SIZE_NOISE.sub(" ", requested)).strip()
+    return _GARMENT_ALIASES.get(out.casefold(), out) or requested
+
+
+def _num_in(s: str) -> float | None:
+    """A number anywhere in the REQUEST. `_num` stays strict for labels — a label
+    counts as numeric only when it is nothing but a number."""
+    m = re.search(r"\d+(?:\.\d+)?", s)
+    return float(m.group(0)) if m else None
+
+
 def _parts(label: str) -> set[str]:
     return {p for p in re.split(r"[\s/\-–—]+", _norm(label)) if p}
 
@@ -240,7 +273,7 @@ def _match_index(labels: list[str], requested: str) -> int | None:
     for i, lab in enumerate(labels):
         if lab == requested:
             return i
-    rn = _num(requested)
+    rn = _num_in(requested)
     if rn is not None:
         for i, lab in enumerate(labels):
             ln = _num(lab)
@@ -271,6 +304,7 @@ def _choose_size(values: list[tuple[str, bool]], requested: str | None) -> tuple
     if requested is None:
         return next(i for i, (_, a) in enumerate(values) if a), False
 
+    requested = _clean_request(requested)
     idx = _match_index([lab for lab, _ in values], requested)
     if idx is not None:
         if values[idx][1]:
@@ -278,11 +312,14 @@ def _choose_size(values: list[tuple[str, bool]], requested: str | None) -> tuple
         near = _nearest_available(values, idx)
         return (near, True) if near is not None else None
 
-    rn = _num(requested)
+    rn = _num_in(requested)
     if rn is not None:
         numeric = [(i, _num(lab)) for i, (lab, a) in enumerate(values) if a and _num(lab) is not None]
         if numeric:
-            return min(numeric, key=lambda p: abs(p[1] - rn))[0], True
+            # Landing on the requested number IS the requested size. Reporting it as a
+            # substitution told the customer their in-stock size was sold out.
+            best, found = min(numeric, key=lambda p: abs(p[1] - rn))
+            return best, found != rn
 
     offered_a_choice = len(values) > 1 or _is_real_size(values[0][0])
     return next(i for i, (_, a) in enumerate(values) if a), offered_a_choice
@@ -343,6 +380,90 @@ def _next_option(product: dict[str, Any], name: str, seen: list[str]) -> str | N
     return next((lab for lab, avail in _values(product, name) if avail and lab not in seen), None)
 
 
+def _feed_values(product: CatalogProduct) -> list[tuple[str, bool]]:
+    """Size component of every variant, in feed order. A feed variant `title` is the
+    option values joined by ' / ' in `option_names` order, so 'Dark Cinnamon / 6.5'
+    yields '6.5' and the numeric nearest-size search keeps working.
+
+    Positional splitting is only trusted when the part count matches the option count.
+    An option VALUE may itself contain a slash — the MT500 bag is Colour+Size and reads
+    'Smoked Black / M / 5\'2"-5\'5"' — and mis-slicing that would match on a height
+    range. Falling back to the whole title is safe: `_match_index` tokenises it."""
+    idx = next((i for i, name in enumerate(product.option_names) if _is_size(name)), None)
+    out: list[tuple[str, bool]] = []
+    for v in product.variants:
+        parts = [p.strip() for p in v.size_label.split("/")]
+        if idx is not None and len(parts) == len(product.option_names):
+            out.append((parts[idx], v.available))
+        else:
+            out.append((v.size_label, v.available))
+    return out
+
+
+def _resolve_from_feed(product: CatalogProduct, requested_size: str | None) -> ResolvedVariant | None:
+    """Resolve against data we already hold, at ZERO MCP calls.
+
+    The storefront feed carries every variant's id, title, price and stock flag, the
+    id IS the MCP variant GID (verified: feed 41919445434430 'Dark Cinnamon / 6.5' ==
+    get_product's gid://shopify/ProductVariant/41919445434430), and the collection
+    feed's `available` cross-checks against `get_product` exactly (AGENTS.md §Catalog).
+    The three-call grid walk therefore buys nothing — and it was what tripped the rate
+    limiter: 3 calls x 8 slots is a 24-request burst, and a trip costs ~48 minutes.
+    """
+    values = _feed_values(product)
+    if not values:
+        return None
+
+    chosen: tuple[int, bool] | None = None
+    if requested_size:
+        # The same size usually exists in several colours. An exact available match in
+        # a later colour beats the nearest size in the first one, which `_choose_size`
+        # alone would pick — and would then disclose a substitution that never happened.
+        want = _norm(_clean_request(requested_size))
+        exact = next((i for i, (lab, avail) in enumerate(values) if avail and _norm(lab) == want), None)
+        if exact is not None:
+            chosen = (exact, False)
+
+    if chosen is None:
+        chosen = _choose_size(values, requested_size)
+    if chosen is None:
+        return None
+
+    idx, substituted = chosen
+    variant = product.variants[idx]
+    emit(
+        "catalog.size_matched",
+        {
+            "product": product.product_gid,
+            "requested": requested_size,
+            "label": variant.size_label,
+            "substituted": substituted,
+            "source": "storefront_feed",
+        },
+        "guardrail" if substituted else "info",
+    )
+    rv = ResolvedVariant(
+        variant_gid=variant.variant_gid,
+        size_label=variant.size_label,
+        price_minor=variant.price_minor,
+        available=True,
+        substituted=substituted,
+        requested_size=requested_size,
+    )
+    emit(
+        "catalog.variant_resolved",
+        {
+            "product": product.product_gid,
+            "variant": rv.variant_gid,
+            "label": rv.size_label,
+            "price_minor": rv.price_minor,
+            "substituted": rv.substituted,
+            "source": "storefront_feed",
+        },
+    )
+    return rv
+
+
 async def resolve_variant(product: CatalogProduct, requested_size: str | None = None) -> ResolvedVariant:
     """Per-person resolution repeats the same (product, size) pair, so successes are
     held briefly. Bounded by TTL because this DOES hold availability — unlike _labels.
@@ -360,6 +481,24 @@ async def resolve_variant(product: CatalogProduct, requested_size: str | None = 
 
 
 async def _resolve_variant(product: CatalogProduct, requested_size: str | None) -> ResolvedVariant:
+    from_feed = _resolve_from_feed(product, requested_size)
+    if from_feed is not None:
+        return from_feed
+
+    if product.variants:
+        # Every variant and its stock flag came from the feed, so "nothing matched"
+        # here is the real answer rather than a gap worth spending MCP calls on.
+        emit("catalog.no_stock", {"product": product.product_gid, "title": product.title}, "guardrail")
+        raise NoStockError(product, _feed_values(product))
+
+    emit("catalog.feed_variantless", {"product": product.product_gid}, "guardrail")
+    return await _resolve_via_mcp(product, requested_size)
+
+
+async def _resolve_via_mcp(product: CatalogProduct, requested_size: str | None) -> ResolvedVariant:
+    """The verified three-call grid walk. Only reachable for a product the feed handed
+    us with no variants at all — kept because it is proven against live behaviour
+    (`get_product` with no `selected` returns available: null, hence the partial probe)."""
     gid = product.product_gid
     options = await _option_labels(gid)
     size_opt = next((o for o in options if _is_size(o["name"])), None)

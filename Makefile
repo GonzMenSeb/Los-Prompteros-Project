@@ -1,5 +1,6 @@
 PY := PYTHONPATH=. ./.venv/bin/python
-.PHONY: setup dev tunnel check verify fixtures doctor clean
+PHASE ?= prewarm
+.PHONY: setup dev walkthrough rehearse tunnel check verify fixtures doctor clean
 
 setup:
 	python3.12 -m venv .venv
@@ -14,6 +15,17 @@ setup:
 
 dev:
 	./.venv/bin/reflex run
+
+# The watchable demo: clean server, browser opened, script already running.
+#   make walkthrough                 refusal + research + real kit   ~3 min
+#   make walkthrough PHASE=onstage   injection blocked + real cart   ~25 s
+#   make walkthrough PHASE=all       end to end, for rehearsal
+walkthrough:
+	@bash scripts/walkthrough.sh $(PHASE)
+
+# Same script, no browser: asserts every beat and prints the wall clock per phase.
+rehearse:
+	$(PY) scripts/verify_walkthrough.py
 
 tunnel:
 	@bash scripts/tunnel.sh

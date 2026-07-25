@@ -20,6 +20,22 @@ grab_url() {  # $1 = logfile
 
 pkill -f 'cloudflared tunnel --url' 2>/dev/null || true
 
+# A dev server already on :3000 is the silent killer here. Step 2's `reflex run`
+# would fail to bind, step 2's curl check would be answered by the OLD server —
+# still compiled against http://localhost:8000 — and the frontend tunnel would
+# happily serve that stale bundle. The judge URL then renders and does nothing,
+# which is the exact failure this script exists to prevent.
+# Two patterns: the frontend is a detached `react-router dev` node process under
+# .web/ that outlives the reflex supervisor and keeps holding :3000.
+pkill -9 -f 'bin/reflex' 2>/dev/null || true
+pkill -9 -f '\.web/node_modules/\.bin/react-router' 2>/dev/null || true
+sleep 2
+if ss -ltn 2>/dev/null | grep -qE ':(3000|8000)[[:space:]]'; then
+  echo "ports 3000/8000 still held — reflex needs both, and a stale bundle would be served:"
+  ss -ltnp 2>/dev/null | grep -E ':(3000|8000)[[:space:]]'
+  exit 1
+fi
+
 echo "1/4  backend tunnel (:8000) — needed BEFORE reflex compiles"
 $CF tunnel --url http://localhost:8000 --no-autoupdate >"$LOG/backend.log" 2>&1 &
 BACKEND=$(grab_url "$LOG/backend.log") || { echo "backend tunnel failed"; exit 1; }
