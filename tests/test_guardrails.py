@@ -397,6 +397,48 @@ class TestAttributeInvention:
         assert scrub_prose("", self.items) == ""
 
 
+class TestInventedPrices:
+    """A price the model half-remembers is the worst invention: it sits beside a
+    real cart total. The model is shown `min_price_minor` in the tool payload while
+    the card renders the RESOLVED variant's price, and on a product whose variants
+    differ in price (Forclaz 3-in-1: S=$199, M=$135) those are not the same number.
+    """
+
+    kit = [
+        item(product_title="Forclaz MT100 3-in-1 Jacket", price_minor=19900),
+        item(product_title="Quechua NH500 Boots", price_minor=10000, quantity=2),
+    ]
+
+    @pytest.mark.parametrize("prose", ["It is $135.00.", "It comes to $1,299.", "A $12 tent."])
+    def test_a_price_no_item_has_is_flagged(self, prose):
+        assert [c.kind for c in find_unbacked_claims(prose, self.kit)] == ["price"]
+
+    @pytest.mark.parametrize(
+        "prose",
+        [
+            "At $199.00 it is the priciest item.",
+            "The jacket is $199 even.",  # cents are optional, it is the same price
+            "The boots are $100.00 each, $200.00 for the pair.",
+            "That comes to $399.00 all in.",
+        ],
+    )
+    def test_unit_line_and_kit_totals_are_all_legitimate(self, prose):
+        assert find_unbacked_claims(prose, self.kit) == []
+
+    def test_a_budget_must_be_whitelisted_by_the_caller(self):
+        """The budget is user-supplied, not derived from the kit, so the caller
+        passes it explicitly rather than the guardrail guessing it is fine."""
+        prose = "That is under your $500.00 budget."
+        assert [c.kind for c in find_unbacked_claims(prose, self.kit)] == ["price"]
+        assert find_unbacked_claims(prose, self.kit, allowed_minor=[50000]) == []
+
+    def test_scrub_removes_the_wrong_price(self, sink):
+        out = scrub_prose("This jacket is $135.00, a great price.", self.kit)
+        assert "$135" not in out
+        assert "a great price." in out
+        assert guardrail_events(sink)[0].payload["kinds"] == ["price"]
+
+
 class TestCheckQueryShape:
     @pytest.mark.parametrize(
         "query,shaped",

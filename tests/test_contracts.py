@@ -85,8 +85,18 @@ async def _probe() -> dict[str, Any]:
             out[key] = fr.json()
 
     try:
-        good_line = {"cart": {"line_items": [{"item": {"id": VARIANT_GID}, "quantity": 1}], "context": CONTEXT}}
+        # created at quantity 2 so the update below can prove REPLACE, not append
+        good_line = {"cart": {"line_items": [{"item": {"id": VARIANT_GID}, "quantity": 2}], "context": CONTEXT}}
         out["cart"] = await call_ucp("create_cart", good_line)
+        cart_id = out["cart"]["id"]
+        out["get_cart"] = await call_ucp("get_cart", {"id": cart_id, "context": CONTEXT})
+        out["update_cart"] = await call_ucp(
+            "update_cart",
+            {
+                "id": cart_id,
+                "cart": {"line_items": [{"item": {"id": VARIANT_GID}, "quantity": 1}], "context": CONTEXT},
+            },
+        )
         out["search_short"] = await call_ucp(
             "search_catalog", {"catalog": {"query": "sleeping bag", "context": CONTEXT, "pagination": {"limit": 10}}}
         )
@@ -178,6 +188,37 @@ def test_cart_line_shape_is_item_id(mcp):
     )
     assert {t["type"] for t in mcp["cart"]["totals"]} >= {"subtotal", "total"}
     assert mcp["cart"]["continue_url"].startswith("http")
+
+
+def _total(cart: dict, kind: str = "total") -> int:
+    return next(t["amount"] for t in cart["totals"] if t["type"] == kind)
+
+
+@pytest.mark.live
+def test_get_cart_takes_a_flat_id_not_a_nested_cart(mcp):
+    fetched = mcp["get_cart"]
+    assert {li["item"]["id"] for li in fetched["line_items"]} == {VARIANT_GID}, (
+        f"get_cart's argument shape changed. {FACTS} says get_cart is FLAT —\n"
+        '  {"id": cart_id, "context": CONTEXT} — unlike create_cart, which nests under "cart".\n'
+        '  Nesting it returns "Missing required arguments: id".'
+    )
+
+
+@pytest.mark.live
+def test_update_cart_replaces_line_items_rather_than_appending(mcp):
+    """The silent cart-doubling bug. update_cart wants BOTH nestings —
+    {"id": ..., "cart": {"line_items": [...]}} — and REPLACES the lines."""
+    unit = mcp["cart"]["line_items"][0]["item"]["price"]
+    assert _total(mcp["cart"]) == unit * 2, "setup: cart was created with quantity 2"
+
+    updated = mcp["update_cart"]
+    assert _total(updated) == unit, (
+        f"update_cart appended instead of replacing. {FACTS} says it REPLACES line_items:\n"
+        f"  a cart of 2 updated to a single quantity-1 line must total {unit}, not "
+        f"{_total(updated)}.\n"
+        "  If this became append semantics, every edit silently doubles the customer's cart."
+    )
+    assert sum(li["quantity"] for li in updated["line_items"]) == 1
 
 
 @pytest.mark.live

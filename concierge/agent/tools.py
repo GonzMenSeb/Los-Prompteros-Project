@@ -32,9 +32,50 @@ _backend: Any = stubs
 _cache: ContextVar[dict[str, CatalogProduct] | None] = ContextVar("catalog_cache", default=None)
 
 
+class _Adapter:
+    """Normalises a catalog backend to the four calls the loop expects.
+
+    commerce/catalog.py signals by exception (UnknownHandle, NoStockError) and
+    names its keyword search `search_fallback`. The loop is written against
+    empty-list / None returns, so the translation lives here rather than as
+    try/except scattered through loop.py.
+    """
+
+    def __init__(self, impl: Any) -> None:
+        self._impl = impl
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._impl, name)
+
+    async def get_taxonomy(self) -> list[dict[str, str]]:
+        return await self._impl.get_taxonomy()
+
+    async def get_collection(self, handle: str, limit: int = 12) -> list[CatalogProduct]:
+        try:
+            return await self._impl.get_collection(handle, limit)
+        except Exception as exc:
+            if type(exc).__name__ != "UnknownHandle":
+                raise
+            suggestions = list(getattr(exc, "suggestions", []))[:MAX_SUGGESTIONS]
+            emit("guardrail.handle_rejected", {"handle": handle, "suggestions": suggestions}, level="guardrail")
+            return []
+
+    async def search_catalog(self, query: str, limit: int = 10) -> list[CatalogProduct]:
+        fn = getattr(self._impl, "search_catalog", None) or getattr(self._impl, "search_fallback")
+        return await fn(query, limit)
+
+    async def resolve_variant(self, product: CatalogProduct, requested_size: str | None = None) -> Any:
+        try:
+            return await self._impl.resolve_variant(product, requested_size)
+        except Exception as exc:
+            if type(exc).__name__ != "NoStockError":
+                raise
+            return None
+
+
 def set_backend(module_or_obj: Any) -> None:
     global _backend
-    _backend = module_or_obj
+    _backend = _Adapter(module_or_obj)
     emit("tools.backend", {"backend": getattr(module_or_obj, "__name__", type(module_or_obj).__name__)})
 
 
@@ -221,3 +262,6 @@ DISPATCH: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
     "get_collection_products": get_collection_products,
     "search_products": search_products,
 }
+
+# Wrapped, not bare, so importing tools.py without loop.py still gets the adapter.
+set_backend(stubs)

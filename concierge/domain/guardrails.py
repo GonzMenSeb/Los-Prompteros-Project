@@ -10,7 +10,7 @@ from __future__ import annotations
 import html
 import re
 import unicodedata
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
@@ -441,12 +441,19 @@ def find_unbacked_claims(
     even when a title says "23°F", because the model did not read that off the JSON.
     """
     backing = _backing_text(items)
+    prices = _allowed_prices(items, allowed_minor)
     # 1:1 char substitution, so match offsets stay valid against the original text
     probe = text.translate(_DASHES)
 
     hits: list[SpecClaim] = []
     for kind, pattern in _CLAIM_PATTERNS:
         for m in pattern.finditer(probe):
+            if kind == "price":
+                # compared as a number, not a string: "$135" and "$135.00" are one price
+                if _price_minor(m.group(0)) in prices:
+                    continue
+                hits.append(SpecClaim(text=m.group(0).strip(), kind=kind, start=m.start(), end=m.end()))
+                continue
             # `key` is the measurement itself; matching the framing words too
             # ("rated to 5C") would never find backing for a spec the title states.
             if _compact(m.groupdict().get("key") or m.group(0)) in backing:
@@ -461,13 +468,13 @@ def find_unbacked_claims(
     return claims
 
 
-def scrub_prose(text: str, items: Sequence[Any]) -> str:
+def scrub_prose(text: str, items: Sequence[Any], *, allowed_minor: Iterable[int] = ()) -> str:
     """Excise unbacked spec claims from model prose. Detection is the deliverable —
     the claim phrase goes, the surrounding reasoning stays."""
     if not text:
         return ""
 
-    claims = find_unbacked_claims(text, items)
+    claims = find_unbacked_claims(text, items, allowed_minor=allowed_minor)
     if not claims:
         return text
 

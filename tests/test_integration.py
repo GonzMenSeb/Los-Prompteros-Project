@@ -169,4 +169,16 @@ class TestDisclosureReachesTheUser:
     def test_disclosure_text_invents_no_specifications(self):
         loop = _mod("concierge.agent.loop")
         kit = Kit(items=[item(size_label="L", size_substituted=True)], unservable_slots=["helmet"], budget_minor=9000)
-        assert find_unbacked_claims(loop._disclosures(kit), kit.items) == []
+        text = loop._disclosures(kit)
+
+        # The budget and the gap are computed in code, not recalled by the model, so
+        # they are legitimate prices that the kit alone cannot vouch for. Anything
+        # wiring scrub_prose into a turn that quotes a budget must whitelist them.
+        allowed = [kit.budget_minor, abs(kit.total_minor - kit.budget_minor)]
+        assert find_unbacked_claims(text, kit.items, allowed_minor=allowed) == []
+
+    def test_a_budget_figure_is_flagged_when_not_whitelisted(self):
+        loop = _mod("concierge.agent.loop")
+        kit = Kit(items=[item(price_minor=10000)], budget_minor=9000)
+        claims = find_unbacked_claims(loop._disclosures(kit), kit.items)
+        assert {c.kind for c in claims} == {"price"}

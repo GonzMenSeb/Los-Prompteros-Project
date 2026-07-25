@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import re
+import time
 from typing import Any
 
 import httpx
@@ -34,6 +35,9 @@ _tax_lock = asyncio.Lock()
 # product gid -> [{"name": str, "values": [label, ...]}]. Labels only: option
 # labels are stable, availability is not and must never be served from a cache.
 _labels: dict[str, list[dict[str, Any]]] = {}
+
+_RESOLVED_TTL = 120.0
+_resolved_cache: dict[tuple[str, str | None], tuple[float, ResolvedVariant]] = {}
 
 
 class UnknownHandle(Exception):
@@ -213,6 +217,15 @@ def _is_size(name: str) -> bool:
     return "size" in name.casefold()
 
 
+_GARMENT = {"xxs", "2xs", "xs", "s", "m", "l", "xl", "xxl", "2xl", "xxxl", "3xl", "4xl", "5xl"}
+
+
+def _is_real_size(label: str) -> bool:
+    """"One Size" / "70 L" is a placeholder, not a size the customer could have asked
+    for — resolving to it is not a substitution and must not be disclosed as one."""
+    return _num(label) is not None or _norm(label) in _GARMENT
+
+
 def _num(s: str) -> float | None:
     m = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*", s)
     return float(m.group(1)) if m else None
@@ -269,7 +282,9 @@ def _choose_size(values: list[tuple[str, bool]], requested: str | None) -> tuple
         numeric = [(i, _num(lab)) for i, (lab, a) in enumerate(values) if a and _num(lab) is not None]
         if numeric:
             return min(numeric, key=lambda p: abs(p[1] - rn))[0], True
-    return next(i for i, (_, a) in enumerate(values) if a), True
+
+    offered_a_choice = len(values) > 1 or _is_real_size(values[0][0])
+    return next(i for i, (_, a) in enumerate(values) if a), offered_a_choice
 
 
 async def _get_product(gid: str, selected: list[dict[str, str]] | None) -> dict[str, Any]:
@@ -328,6 +343,22 @@ def _next_option(product: dict[str, Any], name: str, seen: list[str]) -> str | N
 
 
 async def resolve_variant(product: CatalogProduct, requested_size: str | None = None) -> ResolvedVariant:
+    """Per-person resolution repeats the same (product, size) pair, so successes are
+    held briefly. Bounded by TTL because this DOES hold availability — unlike _labels.
+    create_cart stays the authoritative stock check; a line that sold out in between
+    is caught by the cart guardrail. Failures are never cached: stock comes back."""
+    key = (product.product_gid, requested_size)
+    hit = _resolved_cache.get(key)
+    if hit is not None and time.monotonic() - hit[0] < _RESOLVED_TTL:
+        emit("catalog.variant_cached", {"product": key[0], "size": requested_size})
+        return hit[1]
+
+    variant = await _resolve_variant(product, requested_size)
+    _resolved_cache[key] = (time.monotonic(), variant)
+    return variant
+
+
+async def _resolve_variant(product: CatalogProduct, requested_size: str | None) -> ResolvedVariant:
     gid = product.product_gid
     options = await _option_labels(gid)
     size_opt = next((o for o in options if _is_size(o["name"])), None)
