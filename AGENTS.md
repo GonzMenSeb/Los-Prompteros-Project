@@ -224,10 +224,23 @@ reasoning.
 | any tool schema | `agent/tools.py`, the system prompt, and the trace event names |
 | a guardrail | the guardrail table + its test + the trace event |
 | `rxconfig.py` | recompile the frontend; note the new URL in `docs/RUNBOOK.md` |
+| the build's state | tick it off in `docs/HANDOFF.md` — another agent resumes from there |
 | an architectural choice | append to `docs/DECISIONS.md` — never edit a past entry |
 
 **PR checklist:** facts registry still accurate · `make check` green · `make verify`
 green if `commerce/` changed · `DECISIONS.md` appended if architectural.
 
-Full technical specification: [`SPEC.md`](SPEC.md).
-Demo-day sequence and contingencies: [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+## Where the documentation lives
+
+| | |
+|---|---|
+| [`SPEC.md`](SPEC.md) | Full technical specification. Cited by section number throughout the code. |
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Demo-day sequence and contingencies. |
+| [`docs/HANDOFF.md`](docs/HANDOFF.md) | State of the build — resume from this file alone. |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | Append-only architectural log. |
+| [`docs/research/`](docs/research/) | **Archived pre-build research. Outranked by this file.** |
+
+`docs/research/` is provenance, not documentation. It records what was measured before
+the build, and several of its claims were overturned during it — rate-limit recovery,
+the UI framework, the retrieval path, `previous_interaction_id`. **Where it and this
+file disagree, this file wins.** Never "correct" working code to match it.

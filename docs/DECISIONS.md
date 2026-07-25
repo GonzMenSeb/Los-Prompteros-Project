@@ -135,3 +135,20 @@ This surfaced a real bug: a redirect turn produced no kit and
 `awaiting_confirmation` was recomputed from `result.offer_cart` alone, so asking
 about swimming after the kit was built retracted the cart offer for the rest of
 the session. A turn that produces no kit at all now leaves a standing offer alone.
+
+### 2026-07-25 · Pre-build research is archived under `docs/research/`, not deleted
+
+The technical assessment and stack spec were the founding documents — they carry the
+measurements behind every stack choice, and deleting them would throw away the answer
+to "how do you know?". But leaving them loose at the repo root, undated and
+unqualified, made them read as current documentation, and **several of their claims
+were overturned during the build**: rate-limit recovery is ~48 minutes rather than ~4,
+the UI became Reflex rather than Streamlit, retrieval moved to collection feeds, and
+`previous_interaction_id` turned out not to exist on `generate_content`.
+
+That is precisely the hazard `AGENTS.md` exists to prevent — a confident, plausible,
+breaking "fix" made in good faith against a stale source. So they move to
+`docs/research/`, each gets a banner naming the claims that no longer hold, and the
+folder's own README states the precedence rule: **where the research and `AGENTS.md`
+disagree, `AGENTS.md` wins.** Archived, labelled, and outranked — rather than trusted
+or lost.

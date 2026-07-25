@@ -84,49 +84,35 @@ pattern matches the invoking shell's own command line and kills the caller.
       any commit. `doctor.py` now actually checks this (it previously ran the
       search and discarded the result, passing unconditionally).
 - [x] `AGENTS.md`, `commerce/AGENTS.md`, `DECISIONS.md`, `RUNBOOK.md`.
-
-## IN PROGRESS
-
-- [ ] **Decathlon-native restyle.** The client wants this to look like it belongs
-      inside decathlon.com. Their real tokens, scraped from their live homepage:
-
-      BRAND       #3643BA   primary (their --color-background: rgb(54 67 186))
-      BRAND_DARK  #2E3998 · BRAND_DEEP #272F76
-      TINT_1      #F5F6FC (page) · TINT_2 #E7E8F7 · TINT_3 #D3D8F7
-      INK         #232323 · GREY #707070 / #949494 / #BEBEBE / #E1E0DF
-      OFFWHITE    #F3F3F3 · WHITE #FFFFFF
-      SUCCESS     #148558 · DANGER #D70322 · WARN #FFCD4E
-
-      Font: their 'Decathlon Brand/Display/Text' are proprietary — use **Inter**
-      (they load it too) with a sans-serif fallback.
-      **Light theme, not dark.** White cards on a pale-blue wash, squarer radii
-      (4–8px), price as prominent bold ink, solid blue primary buttons.
-      `#7AFFA7` is their *promotional* green — do NOT use it for "in stock", it
-      reads as a sale badge. Use `#148558`.
-
-      Files: `concierge/ui/theme.py` (token source, everything imports from it)
-      plus hardcoded rgba values in `ui/product.py`, `ui/cart.py`,
-      `ui/trace_panel.py`, and `appearance="dark"` in `concierge/app.py`.
-
-- [ ] **A reference design was provided** as a shared Claude artifact,
-      `https://claude.ai/code/artifact/faa6d28e-17ef-4a59-b010-b96b00db3fa0`
-      ("Expedition Concierge Integration"). **It could not be read** — the fetch
-      fails with *"served to you as a public (non-member) reader, and reading
-      public artifacts that way is not enabled yet"*, both directly and via the
-      shared-artifact list. To use it, get the HTML into the repo (save it under
-      `docs/design-reference.html`) or have the owner re-publish it.
+- [x] **Decathlon-native restyle** (`d49f2dd`, `100b9ce`, `ad10af1`). Their real
+      tokens live in `concierge/ui/theme.py` and everything imports from there —
+      BRAND `#3643BA`, light theme, Inter, squarer radii, `#148558` for "in stock"
+      because their `#7AFFA7` is a *promotional* green and reads as a sale badge.
+      The bot is **DecaBot**: two-tone wordmark, presence dot green on live catalog
+      and amber on a fixture replay.
+- [x] **Feed-first variant resolution** (`e5bb954`). `resolve_variant` runs off the
+      storefront feed at **zero MCP calls**; `create_cart` is the only MCP call in a
+      demo run. The old three-call grid walk is what tripped the rate limiter.
+- [x] **Two-phase scripted walkthrough** (`e5bb954`, `ad10af1`) — prewarm + onstage,
+      both live, driven by `?walkthrough=<phase>`.
+- [x] **Reconnect no longer wipes the kit** (`ad10af1`). Reflex re-fires `on_load` on
+      every websocket *reconnect*, which re-armed the whole script whenever the
+      tunnel blinked. `walkthrough_autostarted` latches it once per session.
+      Verified in the browser: cart, 12 product cards, kit total and transcript all
+      survive a re-fired `on_load`.
+- [x] **Tunnels brought up end to end** via `make tunnel` — backend tunnel, compile
+      against it, frontend tunnel, judge URL printed. `make reload` re-compiles
+      without minting new URLs, so a QR code already in the wild stays valid.
+- [x] **Repo organised and docs refreshed** (this pass). Pre-build research archived
+      under `docs/research/` with superseded-facts banners; `README.md` rewritten to
+      describe the app rather than the two recon reports it used to ship.
 
 ## NOT DONE — highest value first
 
-- [ ] **Click "Build my cart" in the browser.** The single most important
-      untested path: `confirm_cart` → `commerce.cart.create_cart` →
-      `_apply_cart` → `cart_block` rendering a live `continue_url`. Every step
-      upstream is verified; this click never has been. Do it on a *fresh*
-      `reflex run` (the dev server hot-reloads across edits and its module state
-      goes stale).
-- [ ] **Tunnels + phone test.** `make tunnel`, then open the judge URL **from a
+- [ ] **Phone test over the tunnel.** `make tunnel`, then open the judge URL **from a
       phone, not the build laptop**, and send one message. A reply is the only
-      positive proof the WebSocket reached the tunnelled backend.
+      positive proof the WebSocket reached the tunnelled backend. The tunnels have
+      been up; this specific proof has not been recorded.
 - [ ] **Rehearse the four judge checks** in `docs/RUNBOOK.md` §"four judge
       checks" — cart link, product click-through, out-of-stock size, absurd
       budget. Plus swimming-gear refusal and prompt injection.
@@ -137,6 +123,12 @@ pattern matches the invoking shell's own command line and kills the caller.
 - [ ] Stretch, in priority order: host our own UCP agent profile on GitHub Pages;
       inline citations beside each gear rationale; expose the concierge itself
       as an MCP server.
+
+**Dropped.** A reference design was shared as a Claude artifact
+(`faa6d28e-17ef-4a59-b010-b96b00db3fa0`, "Expedition Concierge Integration"). It was
+never readable — the fetch fails with *"served to you as a public (non-member)
+reader"* — and the restyle shipped from Decathlon's own scraped tokens instead, which
+is the stronger provenance anyway. Only revisit if the owner re-publishes it.
 
 ## Traps that will cost you an hour if you "fix" them
 

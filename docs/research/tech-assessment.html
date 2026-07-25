@@ -201,6 +201,12 @@ footer{padding:32px 0 60px;}
 }
 </style>
 
+<div style="background:var(--gate-bg);border-bottom:1px solid var(--line)"><div class="wrap" style="padding:15px 26px">
+  <p style="font-family:ui-monospace,monospace;font-size:10.5px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:var(--gate);margin-bottom:7px">Archived · pre-build research</p>
+  <p style="font-size:13.2px;color:var(--body);max-width:90ch">Written <b>before the build</b> and kept for provenance — it records what was measured and why the stack was chosen. <b>It is not the current state of the system, and parts of it are now known wrong.</b> Where this document and <a href="../../AGENTS.md">AGENTS.md</a> disagree, <b>AGENTS.md wins</b>: it carries the load-bearing-facts registry, re-verified against live services and pinned by <code>tests/test_contracts.py</code>.</p>
+  <p style="font-size:13.2px;color:var(--body);max-width:90ch;margin-top:8px"><b>Superseded here:</b> rate-limit recovery is <b>~48 minutes, not ~4</b>, and <code>Retry-After</code> is honest rather than misleading · the UI is <b>Reflex</b>, not Streamlit · retrieval runs on <b>live collection feeds</b>, not <code>search_catalog</code> · <code>previous_interaction_id</code> <b>does not exist</b> on <code>generate_content</code>, so history is threaded client-side · the Gemini layer, flagged untested below, has since been verified.</p>
+</div></div>
+
 <div class="mast"><div class="wrap">
   <p class="kicker">Technical assessment · verified live 24 Jul 2026</p>
   <h1>Expedition Concierge</h1>

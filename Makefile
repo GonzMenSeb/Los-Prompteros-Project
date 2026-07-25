@@ -1,6 +1,6 @@
 PY := PYTHONPATH=. ./.venv/bin/python
 PHASE ?= prewarm
-.PHONY: setup dev walkthrough rehearse tunnel reload check verify fixtures doctor clean
+.PHONY: setup dev walkthrough rehearse tunnel reload check verify fixtures doctor clean distclean
 
 setup:
 	python3.12 -m venv .venv
@@ -47,5 +47,12 @@ fixtures:
 doctor:
 	@$(PY) scripts/doctor.py
 
+# Run artifacts only. Leaves .web/ and bin/cloudflared alone — dropping those costs a
+# long recompile and a 38 MB re-download, which is not what you want before a demo.
 clean:
-	rm -rf .web .tunnel __pycache__ .pytest_cache
+	rm -rf .tunnel .states .playwright-mcp .pytest_cache .reflex-*.log
+	find . -path ./.venv -prune -o -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
+
+# Everything clean does, plus the build caches. Next `make dev` recompiles from scratch.
+distclean: clean
+	rm -rf .web reflex.lock
