@@ -103,9 +103,33 @@ pattern matches the invoking shell's own command line and kills the caller.
 - [x] **Tunnels brought up end to end** via `make tunnel` — backend tunnel, compile
       against it, frontend tunnel, judge URL printed. `make reload` re-compiles
       without minting new URLs, so a QR code already in the wild stays valid.
-- [x] **Repo organised and docs refreshed** (this pass). Pre-build research archived
+- [x] **Repo organised and docs refreshed**. Pre-build research archived
       under `docs/research/` with superseded-facts banners; `README.md` rewritten to
       describe the app rather than the two recon reports it used to ship.
+- [x] **Full walkthrough driven end to end in a browser, 25 Jul.** Both phases, live,
+      zero errors. Swim refusal → grounded research with **7 citations** (3,000–4,290 m,
+      overnight lows to −15 °C) → 8 slots → **12 items, $1,203.97, 6 size swaps** →
+      over-budget reported honestly → sleeping-bag slot left unfilled and named →
+      injection blocked with prices unmoved → **real cart, 12 lines**, `continue_url`
+      confirmed 301-redirecting to `www.decathlon.com/cart/c/…`. Screenshots in
+      `docs/images/`, embedded in the README.
+
+## KNOWN ISSUES — both will show on camera
+
+- [ ] **Prices inside model prose render as LaTeX.** `rx.markdown` treats `$…$` as inline
+      math, so *"$1,203.97 is $303.97 over the $900.00 budget"* renders as
+      `1,203.97is303.97` in a serif math font. Only affects **markdown-rendered model
+      prose** — the kit summary, product cards and cart block are styled components and
+      are unaffected. Fix by escaping `$` before it reaches `rx.markdown` in
+      `concierge/ui/chat.py:174`, or by disabling the math plugin. Visible in
+      `docs/images/07-injection.png` below the fold, which is why that frame is cropped.
+- [ ] **`GEMINI_API_KEY2` — the public-lane key — is quota-exhausted** (`429
+      RESOURCE_EXHAUSTED`, confirmed 25 Jul). `GEMINI_API_KEY` (reserved/VIP lane) is
+      fine. Every non-VIP session round-robins the public pool, so **a QR-code audience
+      currently gets errors** while the presenting laptop works. Before demoing: either
+      top up / replace `GEMINI_API_KEY2`, or empty the pool so it falls back to the
+      reserved key (`public_keys()` in `agent/classify.py` already does that when no
+      other key is configured). The walkthrough above was run with the pool emptied.
 
 ## NOT DONE — highest value first
 
