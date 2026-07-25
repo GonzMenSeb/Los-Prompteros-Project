@@ -22,3 +22,6 @@ venv/
 # Runtime
 run.log
 *.jsonl
+
+# Vendored binaries — fetched by `make setup`, never committed
+bin/
