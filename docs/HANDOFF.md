@@ -123,13 +123,13 @@ pattern matches the invoking shell's own command line and kills the caller.
       are unaffected. Fix by escaping `$` before it reaches `rx.markdown` in
       `concierge/ui/chat.py:174`, or by disabling the math plugin. Visible in
       `docs/images/07-injection.png` below the fold, which is why that frame is cropped.
-- [ ] **`GEMINI_API_KEY2` — the public-lane key — is quota-exhausted** (`429
-      RESOURCE_EXHAUSTED`, confirmed 25 Jul). `GEMINI_API_KEY` (reserved/VIP lane) is
-      fine. Every non-VIP session round-robins the public pool, so **a QR-code audience
-      currently gets errors** while the presenting laptop works. Before demoing: either
-      top up / replace `GEMINI_API_KEY2`, or empty the pool so it falls back to the
-      reserved key (`public_keys()` in `agent/classify.py` already does that when no
-      other key is configured). The walkthrough above was run with the pool emptied.
+- [x] ~~`GEMINI_API_KEY2` quota-exhausted~~ — **resolved 25 Jul.** That key was dropped
+      from `.env`; it is no longer needed. `public_keys()` now falls back to the reserved
+      `GEMINI_API_KEY`, verified: pool size 1, a public-lane call returns cleanly, and
+      `make doctor` is ALL GREEN. **Every session, VIP or not, is now on one key** — so
+      the per-project quota is the single bottleneck if a QR-code audience arrives. If
+      that becomes a risk, add `GEMINI_API_KEY2` (or `GEMINI_PUBLIC_KEYS`) back and the
+      rotation resumes on its own; the machinery is unchanged.
 
 ## NOT DONE — highest value first
 

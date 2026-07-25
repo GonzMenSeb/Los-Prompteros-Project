@@ -9,6 +9,7 @@
 [![Gemini](https://img.shields.io/badge/Gemini-3.6%20Flash-1B72E8?logo=googlegemini&logoColor=white)](https://ai.google.dev/)
 [![Protocol](https://img.shields.io/badge/protocol-UCP%20%2F%20MCP-3643BA)](https://www.decathlon.com/agents.md)
 [![Tests](https://img.shields.io/badge/tests-205%20passing-148558)](tests/)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-D70322)](LICENSE)
 
 ![DecaBot landing screen](docs/images/01-landing.png)
 
@@ -297,5 +298,16 @@ Medellín, July 2026.
 
 ## License
 
-No license has been declared yet, so default copyright applies and all rights are
-reserved. If this repository is going to be shared publicly, add a `LICENSE` file.
+Copyright © 2026 Los Prompteros.
+
+Licensed under the **[GNU Affero General Public License v3.0](LICENSE)**.
+
+You may read, fork, self-host and modify DecaBot freely. The condition is reciprocity:
+if you distribute a modified version — **or run one as a network service** — you must
+release your source under the AGPL too. AGPL was chosen over MIT deliberately, because
+DecaBot is a hosted application and a permissive licence would let anyone operate it
+commercially without contributing anything back.
+
+> **If you deploy a modified DecaBot publicly**, AGPL §13 requires that its users be
+> offered the Corresponding Source. In practice that means linking your fork from the
+> running UI.

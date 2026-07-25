@@ -152,3 +152,32 @@ breaking "fix" made in good faith against a stale source. So they move to
 folder's own README states the precedence rule: **where the research and `AGENTS.md`
 disagree, `AGENTS.md` wins.** Archived, labelled, and outranked — rather than trusted
 or lost.
+
+### 2026-07-25 · AGPL-3.0, chosen over MIT because DecaBot is a hosted app
+
+The repo shipped with no licence at all, which means default copyright and all rights
+reserved — the most restrictive outcome, arrived at by omission rather than intent.
+
+The brief was "a little more restrictive than MIT". The honest finding is that for a
+**network-served application** the licences that are only slightly more restrictive do
+not restrict the thing worth protecting. Apache-2.0 adds a patent grant and an
+attribution duty; MPL-2.0 adds file-level copyleft that triggers on *distribution*.
+Under either, a third party can host a modified DecaBot commercially and owe nothing,
+because hosting is not distribution. That is the SaaS loophole, and among OSI licences
+only the AGPL closes it: §13 extends the source obligation to users who interact with
+the program *over a network*.
+
+So the real choice was cosmetic protection or actual protection, not a dial of
+strictness. AGPL-3.0 keeps the project OSI-approved open source — reading, forking,
+self-hosting and private modification are all unrestricted, so judges, recruiters and
+learners are unaffected — while requiring reciprocity from anyone who runs it as a
+service. The accepted cost is that many companies refuse AGPL code internally, which
+effectively ends corporate reuse; for a hackathon deliverable that is a feature.
+
+Licence text is the verbatim FSF original from gnu.org, diffed against the SPDX
+canonical copy and identical apart from line-wrapping and `http`→`https` on the FSF URL.
+Copyright line is **Los Prompteros**, matching the README credit.
+
+Not done, and required if a modified fork is ever deployed publicly: AGPL §13 obliges
+the running UI to offer its users the Corresponding Source. Today's UI carries no such
+link, which is fine for the original — we publish the source — but a fork must add one.
