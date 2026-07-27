@@ -18,6 +18,19 @@ PYTHONPATH=. ./.venv/bin/python scripts/spike_cart.py hiking-boots --size 10.5
 PYTHONPATH=. ./.venv/bin/python scripts/verify_walkthrough.py   # rehearse, no browser
 ```
 
+**On Windows the `make` targets and `scripts/*.sh` do NOT run** — they assume
+`./.venv/bin/…`, `pkill`, `ss`, `xdg-open`. Run the equivalents directly:
+
+- The venv is at `.venv/Scripts/` — `.venv/Scripts/python.exe`, `.venv/Scripts/reflex.exe`.
+  In Git Bash use forward slashes; after `source .venv/Scripts/activate`, plain `python` /
+  `reflex` resolve.
+- Local demo: `reflex run`, then open `localhost:3000/?walkthrough=<phase>`.
+- Tunnels: `bin/cloudflared.exe` is the binary, but `make tunnel` has no Windows port yet —
+  bring the two up by hand in order (backend `:8000` → `reflex run` compiled against that
+  `CONCIERGE_API_URL` → frontend `:3000`).
+- `scripts/doctor.py` now also detects `cloudflared.exe`; `.gitignore` ignores `.states` /
+  `.web` (both uncommitted as of 26 Jul).
+
 ---
 
 ## Running the demo
@@ -130,6 +143,19 @@ pattern matches the invoking shell's own command line and kills the caller.
       the per-project quota is the single bottleneck if a QR-code audience arrives. If
       that becomes a risk, add `GEMINI_API_KEY2` (or `GEMINI_PUBLIC_KEYS`) back and the
       rotation resumes on its own; the machinery is unchanged.
+- [ ] **Single-key Gemini quota is the live bottleneck — and it got hit (26 Jul).** A full
+      walkthrough on the demo laptop failed with `429 RESOURCE_EXHAUSTED` ("quota exhausted")
+      on the public lane (`lane=public`). **Not the MCP rate limit, not a code bug** — with no
+      `GEMINI_API_KEY2` / `GEMINI_PUBLIC_KEYS`, `public_keys()` falls back to the lone
+      `GEMINI_API_KEY`, and its quota ran out. Turn 1 (swim refusal) still passed because it
+      only spends the cheap gate call; any turn needing the full research + tool loop 429'd.
+      **Amplifier:** each failed turn fires 3 retries (`model.retry attempt=1..3`), so a
+      lockout burns ~3× the quota — stop resending. **Fix is billing, not waiting:** postpay is
+      Tier-3-gated (US$1,000 + 30 days) *and* currently disabled, so prepay is the only path —
+      [aistudio.google.com/billing](https://aistudio.google.com/billing) → **Buy credits**
+      (US$10 min, lands in minutes). The key now in `.env` (`AQ.Ab8…` format) is a
+      billing-project key whose prepay balance is depleted — **recharge pending**; once it has
+      credit, `doctor.py` stays green and the full walkthrough runs without 429.
 
 ## NOT DONE — highest value first
 
