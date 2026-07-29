@@ -153,7 +153,7 @@ pipeline {
                             --label org.opencontainers.image.revision=$GIT_SHA \
                             --label org.opencontainers.image.source=https://github.com/GonzMenSeb/Los-Prompteros-Project \
                             --cache-from type=registry,ref=$IMAGE:buildcache \
-                            --cache-to type=registry,ref=$IMAGE:buildcache,mode=max,oci-mediatypes=true \
+                            --cache-to type=registry,ref=$IMAGE:buildcache,mode=max,oci-mediatypes=true,ignore-error=true \
                             --output type=image,\\"name=$IMAGE:$GIT_SHA,$IMAGE:latest\\",oci-mediatypes=true,push=true \
                             .
                     '''

@@ -277,6 +277,13 @@ overrides the other; check which mode you are in first.
   otherwise a skip-compile boot still tries to *create* `.web/backend` and dies with
   `PermissionError` as the non-root user. `[]` is the correct content for this app.
 - Static frontend lives at **`.web/build/client`** (`Dirs.STATIC = build/client`).
+- **`reflex.lock/` is committed, and must stay committed.** The `Dockerfile` does
+  `COPY reflex.lock/ ./reflex.lock/` and `.dockerignore` explicitly un-ignores it, so a
+  clean clone that lacks it cannot build the image — `failed to compute cache key:
+  "/reflex.lock": not found`. It was in `.gitignore` until 29 Jul, which nobody noticed
+  because every manual build ran from a working tree that already had it; the first CI
+  build from a fresh clone failed instantly. It is `bun.lock` + `package.json`, the
+  frontend dependency pin — a lockfile, which belongs in git anyway.
 - **Granian, not uvicorn.** Reflex ships granian and no uvicorn/gunicorn, so
   `should_use_granian()` is what its own prod path takes. `get_num_workers()` returns
   **1** without Redis — which is what keeps `_SESSIONS` and the `_public_gate` semaphore
