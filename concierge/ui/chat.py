@@ -45,6 +45,7 @@ from concierge.ui.theme import (  # noqa: F401
     SHADOW_XS,
     SUCCESS,
     SUCCESS_BG,
+    SUCCESS_DEEP,
     TEXT,
     TINT_1,
     TINT_2,
@@ -54,6 +55,7 @@ from concierge.ui.theme import (  # noqa: F401
     TRACK_TIGHTER,
     WARN,
     WARN_BG,
+    WARN_INK,
     WHITE,
 )
 
@@ -131,7 +133,7 @@ def citations(m) -> rx.Component:
 def _user_bubble(m: ChatMessage) -> rx.Component:
     return rx.box(
         rx.vstack(
-            eyebrow("YOU", GREY_2),
+            eyebrow("YOU", MUTED),
             rx.text(m.content, size="3", color=TEXT, white_space="pre-wrap", line_height="1.65"),
             spacing="2",
             align="start",
@@ -206,6 +208,10 @@ def _waiting(accent: str, background: str, border: str, note: str = "") -> rx.Co
     return rx.hstack(
         rx.spinner(size="2", color=accent),
         rx.vstack(*lines, spacing="1", align="start"),
+        # A turn runs for a minute or more and `status` changes several times
+        # inside it. Without a live region that whole minute is silent.
+        role="status",
+        aria_live="polite",
         spacing="3",
         align="center",
         padding="0.85rem 1.15rem",
@@ -239,6 +245,7 @@ def composer() -> rx.Component:
         rx.hstack(
             rx.input(
                 name="message",
+                id="db-composer",
                 placeholder="Describe the trip — where, who with, how long…",
                 size="3",
                 width="100%",
@@ -246,10 +253,16 @@ def composer() -> rx.Component:
                 background="transparent",
                 color=TEXT,
                 font_size="1rem",
+                # A placeholder is not a label: it disappears the moment you type,
+                # and a screen reader announces the field as unnamed.
+                aria_label="Describe the trip — where, who with, how long",
             ),
             rx.button(
                 rx.icon("send-horizontal", size=17),
+                # The word is hidden below md, which left an unnamed icon button on
+                # exactly the viewport where a demo audience holds the QR code.
                 rx.text("Send", size="2", weight="bold", display=["none", "none", "block"]),
+                aria_label="Send",
                 type="submit",
                 size="3",
                 disabled=State.is_thinking,
@@ -320,6 +333,10 @@ def empty_state() -> rx.Component:
             rx.vstack(
                 rx.heading(
                     "Describe the expedition.",
+                    # h2, not the default h1. This block is unmounted the moment the
+                    # first message lands, so as an h1 it took the page's only
+                    # top-level heading with it. app.py owns the persistent h1.
+                    as_="h2",
                     size="7",
                     color=TEXT,
                     letter_spacing=TRACK_TIGHTER,
@@ -363,7 +380,18 @@ def empty_state() -> rx.Component:
 def chat_panel() -> rx.Component:
     return rx.vstack(
         empty_state(),
-        rx.foreach(State.messages, bubble),
+        rx.vstack(
+            rx.foreach(State.messages, bubble),
+            # The reply arrives asynchronously — nothing else on the page announces
+            # it. `log` rather than `polite`: this is an ordered running transcript,
+            # and it must not interrupt whatever the status region is saying.
+            role="log",
+            aria_live="polite",
+            aria_label="Conversation with DecaBot",
+            spacing="3",
+            width="100%",
+            align="start",
+        ),
         thinking(),
         spacing="3",
         width="100%",

@@ -49,6 +49,7 @@ from concierge.ui.theme import (  # noqa: F401
     SHADOW_XS,
     SUCCESS,
     SUCCESS_BG,
+    SUCCESS_DEEP,
     TEXT,
     TINT_1,
     TINT_2,
@@ -58,6 +59,7 @@ from concierge.ui.theme import (  # noqa: F401
     TRACK_TIGHTER,
     WARN,
     WARN_BG,
+    WARN_INK,
     WHITE,
 )
 
@@ -99,6 +101,39 @@ def confirm_bar() -> rx.Component:
                 ),
                 spacing="2",
                 align="center",
+            ),
+            # Not a gate on the cart button — DECISIONS, 29 Jul.
+            rx.cond(
+                State.has_unconfirmed,
+                rx.vstack(
+                    rx.button(
+                        rx.hstack(
+                            rx.icon("pencil", size=17),
+                            rx.text("Tell DecaBot my sizes", size="2", weight="bold"),
+                            spacing="2",
+                            align="center",
+                        ),
+                        on_click=rx.set_focus("db-composer"),
+                        disabled=State.is_thinking,
+                        variant="outline",
+                        size="3",
+                        width="100%",
+                        min_height="44px",
+                        cursor="pointer",
+                        color=BRAND,
+                        border_radius=RADIUS,
+                        _hover={"background": TINT_2},
+                    ),
+                    rx.text(
+                        State.unconfirmed_note,
+                        size="1",
+                        color=MUTED,
+                        text_align="center",
+                        width="100%",
+                    ),
+                    spacing="2",
+                    width="100%",
+                ),
             ),
             rx.button(
                 rx.hstack(
@@ -196,7 +231,7 @@ def cart_block() -> rx.Component:
                 ),
                 rx.cond(
                     State.cart_expires_at != "",
-                    rx.text(f"Expires {State.cart_expires_at}", size="1", color=GREY_2, font_family=MONO),
+                    rx.text(f"Expires {State.cart_expires_at}", size="1", color=MUTED, font_family=MONO),
                 ),
                 spacing="1",
                 align="start",

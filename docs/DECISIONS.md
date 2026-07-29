@@ -423,6 +423,7 @@ Rejected again, and now on better grounds: `curl_cffi` or any browser-impersonat
 transport. Decathlon's `agents.md` explicitly permits the endpoints we read and asks
 only that we back off on 429 — which we do. The fix that worked is "open a fresh
 connection", not "look like a browser", and that distinction is worth keeping.
+
 ### 2026-07-29 · Ask for the size, and keep asking until it is given
 
 A live run went out with a US 7 boot for a 9.5 foot. The rate limit was the trigger,
@@ -458,3 +459,79 @@ The reasoning is that seeing the products is what makes the size question answer
 a blocked button on a demo stage is worse than a wrong size on an editable cart. The cost
 is real and accepted: a customer who ignores both asks checks out in a guessed size.
 Revisit if that ever happens to someone who is not us.
+
+### 2026-07-29 · The palette has ink colours and it has icon colours, and they are not the same list
+
+An accessibility pass measured every foreground/background pair this theme actually
+produces. Four failed AA, and all four failed the same way: a grey chosen for how it
+looked next to a border was then used to set type.
+
+- `GREY_2 #949494` — 3.03:1 on white, 2.81:1 on `TINT_1`. It was setting the "YOU"
+  eyebrow, "NO PHOTO IN CATALOG", the trace sequence numbers and the cart expiry.
+- the composer placeholder `#a3a3a3` — 2.52:1.
+- `SUCCESS` on `SUCCESS_BG` — 4.08:1, under AA for the small bold type of the
+  in-stock chip.
+
+The fix is a rule rather than a new set of tokens: **`GREY_2` and `GREY_3` are icon
+and rule colours and never set type.** Anything that reads as words uses `MUTED`
+(4.95:1 on white) or darker. Two tokens were added only where the rule left a real
+gap — `SUCCESS_DEEP` for green type on its own tint, and `WARN_INK` because `WARN`
+is a surface at 1.6:1 and there was no amber that could be written with.
+
+Also recorded, because it will look like a regression to anyone reading the diff:
+the empty state's heading is now an `h2`. It was the page's only `h1`, and it
+unmounts the moment the first message lands — so every screen after the first had a
+document with no top-level heading. `app.py` owns a visually hidden `h1` instead.
+
+The audit's one remaining detector finding — "Inter is an overused font" — is a
+verified false positive and stays. Inter is the face Decathlon themselves load, and
+the entire pitch is that this drops into their site unnoticed. The brief outranks
+the saturation warning.
+
+### 2026-07-29 · The guessed size gets a way to answer it, and a name attached to it
+
+The badge told you a size had been guessed and then left you to work out what to do
+about it — the ask was a sentence in the transcript, above a kit several thousand pixels
+long. There is now a "Tell DecaBot my sizes" button in the confirm bar that focuses the
+composer, under a grey line counting what is still generic.
+
+It does **not** gate the cart button. That is the entry above, unchanged: seeing the
+products is what makes the size question answerable, and the cart stays editable. This
+adds the route to answering, not a blocker on the way.
+
+**`KitItem.person_indexes` is a list of ordinals, not a name.** `_merge_variants` folds
+two people onto one cart line when they take the same variant — it exists because
+`create_cart` merges identical variants into one line, and `len(kit.items)` has to keep
+agreeing with `line_count`. A scalar would have had to be dropped at that merge, and the
+card would then have read as person 1's alone. Ordinals rather than rendered `"Person N"`
+strings so the wording lives in one UI formatter instead of being minted in the agent
+loop and again in the fixture — and so ordering is numeric: sorted as strings,
+`Person 10` lands between `Person 1` and `Person 2`. Empty means shared kit or a party
+of one.
+
+**The person counter runs per slot, not per pick.** A party of two splits across two
+picks for one slot — a women's boot and a men's one — not across two sizes inside one
+pick, which is what a per-pick index would have assumed. The labels are positional
+(`Person 1`, `Person 2`) and their stability across slots depends on the model emitting
+picks in a consistent order; it usually does, because it works the slot list in order.
+A wrong-but-consistent grouping is still better than a kit where two people's gear is
+interleaved with nothing saying which is which, but this is the weak point to revisit
+if the model is ever seen shuffling picks within a slot.
+
+Recorded because it will look like a bug to anyone reading the diff: the kit grid is one
+flat `rx.grid` whose person headings are cards carrying a `person_heading`, spanning
+every column via `grid-column: 1 / -1`. That is what keeps every block on one shared set
+of column widths — a grid per group would let the columns drift between people.
+
+**And a trap worth the paragraph, because the first attempt here recorded the wrong
+cause.** The obvious shape — a group model holding `items: list[KitCard]`, nested
+`rx.foreach` — dies at component construction with `TypeError: Unsupported type
+<class 'method'>`. It is tempting to conclude Reflex cannot type a list reached through
+a foreach loop variable. It can. **`ObjectVar` defines its own `items`** (an alias of
+`entries`), so `group.items` hands back a bound method instead of the field. Rename the
+field to `cards` and the identical nested shape renders fine on 0.9.7. Anyone who
+believes the first diagnosis will flatten a model that never needed flattening.
+
+That failure shipped green: every state-level assertion passed while the page was dead,
+and the app has one route, so nothing rendered at all. `make check` never built a
+component. `test_the_kit_grid_still_builds` now does.
