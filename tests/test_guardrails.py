@@ -7,6 +7,7 @@ from concierge.domain.guardrails import (
     check_coverage,
     check_provenance,
     check_query_shape,
+    check_size_confirmation,
     check_stock,
     check_substitution,
     find_unbacked_claims,
@@ -213,6 +214,22 @@ class TestCheckSubstitution:
         )
         assert len(out) == 2
         assert any(BAG_TITLE in s for s in out)
+
+
+class TestCheckSizeConfirmation:
+    def test_a_confirmed_size_asks_nothing(self):
+        assert check_size_confirmation([item(), item()]) == []
+
+    def test_an_unasked_size_is_surfaced(self, sink):
+        out = check_size_confirmation([item(size_label="7", size_confirmed=False)])
+        assert len(out) == 1
+        assert "7" in out[0]
+        assert guardrail_events(sink)[0].payload["count"] == 1
+
+    def test_a_substituted_size_was_still_asked_for(self):
+        # size_substituted means the size WAS given and was sold out — a different
+        # disclosure. Only check_substitution owns that sentence.
+        assert check_size_confirmation([item(size_substituted=True)]) == []
 
 
 class TestCheckProvenance:

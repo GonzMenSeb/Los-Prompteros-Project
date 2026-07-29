@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from concierge import walkthrough
+from concierge.domain.guardrails import check_size_confirmation
 from concierge.domain.models import CartResult, KitItem, minor_to_display
 from concierge.obs import bundle
 from concierge.obs.trace import TraceEvent, bind_sink, emit
@@ -709,6 +710,19 @@ class State(rx.State):
                     "continue_url": cart.continue_url,
                 },
             )
+            # The cart goes out with whatever sizes we have, but a line the customer
+            # never sized is a wrong-fit return waiting to happen. Ask now, while the
+            # cart is still editable, rather than letting them discover it at checkout.
+            asks = check_size_confirmation(self.kit_items)
+            if asks:
+                self.messages.append(
+                    ChatMessage(
+                        role="assistant",
+                        content="Your cart is live — the link is beside this message.\n\n"
+                        + "\n".join(asks)
+                        + "\n\nGive me the sizes and I'll rebuild the kit and hand you a new link.",
+                    )
+                )
             self._drain(sink)
         except Exception as exc:
             emit("cart.error", {"error": repr(exc)}, level="error")

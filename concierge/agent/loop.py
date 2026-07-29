@@ -28,7 +28,13 @@ from pydantic import BaseModel, Field, ValidationError
 
 from concierge.agent import prompts, tools
 from concierge.agent.classify import MODEL, classify, generate
-from concierge.domain.guardrails import check_budget, check_stock, check_substitution, scrub_prose
+from concierge.domain.guardrails import (
+    check_budget,
+    check_size_confirmation,
+    check_stock,
+    check_substitution,
+    scrub_prose,
+)
 from concierge.domain.models import (
     ActivityProfile,
     CatalogProduct,
@@ -559,6 +565,11 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
         else:
             requests = [None] * max(1, min(int(pick.quantity or party), party, 6))
 
+        # A per-person product offering more than one in-stock variant is a size the
+        # customer gets to choose. Anything else — a tent, a one-size item — is not
+        # something to pester them about.
+        sized = per_person.get(pick.slot, True) and len([v for v in product.variants if v.available]) > 1
+
         by_variant: dict[str, tuple[Any, int]] = {}
         for want in requests:
             resolved = await backend.resolve_variant(product, want)
@@ -587,6 +598,7 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
                     "quantity": qty,
                     "available": resolved.available,
                     "size_substituted": resolved.substituted,
+                    "size_confirmed": resolved.requested_size is not None or not sized,
                     "rationale": pick.rationale[:300],
                 }
                 for resolved, qty in by_variant.values()
@@ -621,7 +633,7 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
 
 def _disclosures(kit: Kit, unchecked: list[str] | None = None) -> str:
     """Emitted from data, not from the model, so they cannot be forgotten."""
-    lines = list(check_substitution(kit.items))
+    lines = list(check_substitution(kit.items)) + check_size_confirmation(kit.items)
     # A slot we could not read reaches _select as unfilled and lands in
     # unservable_slots like any other. Split it back out here, or the honest
     # "couldn't check" line runs directly under a "not stocked" claim about the

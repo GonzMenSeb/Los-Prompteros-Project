@@ -255,6 +255,24 @@ def check_substitution(items: Sequence[KitItem]) -> list[str]:
     return sentences
 
 
+def check_size_confirmation(items: Sequence[KitItem]) -> list[str]:
+    """One sentence per wearable whose size the customer never gave.
+
+    Without a requested size `_choose_size` takes the first available variant, and
+    nothing else flags it: `size_substituted` stays False because no size was asked
+    for. Observed live 29 Jul 2026 — a 9.5 request arrived one turn too late and the
+    cart went out with a 7. This is the only guardrail that catches that case.
+    """
+    sentences = [
+        f"{i.product_title}: I put a {i.size_label} in the cart because you haven't told "
+        f"me your size yet — tell me and I'll swap that line."
+        for i in items
+        if not i.size_confirmed
+    ]
+    emit("guardrail.size_unconfirmed", {"count": len(sentences), "asks": sentences}, "guardrail")
+    return sentences
+
+
 _VARIANT_GID = "gid://shopify/ProductVariant/"
 
 

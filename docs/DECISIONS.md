@@ -423,3 +423,38 @@ Rejected again, and now on better grounds: `curl_cffi` or any browser-impersonat
 transport. Decathlon's `agents.md` explicitly permits the endpoints we read and asks
 only that we back off on 429 — which we do. The fix that worked is "open a fresh
 connection", not "look like a browser", and that distinction is worth keeping.
+### 2026-07-29 · Ask for the size, and keep asking until it is given
+
+A live run went out with a US 7 boot for a 9.5 foot. The rate limit was the trigger,
+not the fault. `_continue` assigned `session.profile` before `_plan_slots`, so a 429 on
+the taxonomy left the session half-built: the retry took the "user is answering" branch,
+skipped the question stage entirely, and `_choose_size(requested=None)` did what it is
+documented to do — took the first available variant. Nothing flagged it, because
+`size_substituted` is False when no size was ever asked for.
+
+Two changes, and the split matters — but only one of them landed here. The state bug is
+fixed at the root by the rate-limit entry above, which merged first: `_continue` now
+skips a stage only if that stage actually completed, so a 429 in `_plan_slots` leaves
+the session resumable and the next turn re-plans the slots **and** re-enters the question
+stage. This branch carried its own answer to the same root cause — committing `profile`
+and `slots` together — and it was dropped during the rebase rather than merged, because
+two fixes for one bug is one too many and the resumable form also spares a re-run of the
+research and profile calls.
+
+What this entry contributes is the half the root-cause fix does not provide. Re-entering
+the question stage is not enough on its own: the stage can legitimately return an empty
+list, and the model is free to skip the size question. So the guarantee lives in
+`check_size_confirmation`, driven by a new `KitItem.size_confirmed` flag set from
+`ResolvedVariant.requested_size`. Prompt-level asking is a suggestion; the flag is code.
+
+`size_confirmed` is deliberately distinct from `size_substituted`. Substituted means the
+size WAS given and was sold out — a different sentence, and one the customer has already
+half-expected. Unconfirmed means we guessed. Conflating them would have let this failure
+hide inside a disclosure that already existed.
+
+Simón's call on the flow: the cart is NOT blocked on unconfirmed sizes. The link goes out
+with the confirmed lines plus the guessed ones, and the ask is repeated after the link.
+The reasoning is that seeing the products is what makes the size question answerable, and
+a blocked button on a demo stage is worse than a wrong size on an editable cart. The cost
+is real and accepted: a customer who ignores both asks checks out in a guessed size.
+Revisit if that ever happens to someone who is not us.
