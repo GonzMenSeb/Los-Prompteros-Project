@@ -19,7 +19,7 @@ def check(label: str, passed: bool, detail: str = "") -> None:
 
 
 check("python >= 3.11", sys.version_info >= (3, 11), sys.version.split()[0])
-check("cloudflared present", (ROOT / "bin" / "cloudflared").exists() or bool(shutil.which("cloudflared")))
+check("cloudflared present", any((ROOT / "bin" / n).exists() for n in ("cloudflared", "cloudflared.exe")) or bool(shutil.which("cloudflared")))
 check(".env present", (ROOT / ".env").exists())
 check(".env gitignored", ".env" in (ROOT / ".gitignore").read_text())
 

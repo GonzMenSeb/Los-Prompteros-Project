@@ -99,6 +99,12 @@ in the trace panel, the agent carries on unbothered).
   and present locally.
 - **Total connectivity loss** → phone hotspot, then redo `make tunnel` because the
   tunnel URLs change.
+- **Gemini `429 RESOURCE_EXHAUSTED` ("quota exhausted")** → the *key quota*, not the MCP
+  limit and not a bug. Symptom: `lane=public` turns 429 while the swim-refusal turn still
+  passes (it only spends the cheap gate call). **Stop resending** — each turn's 3 retries burn
+  ~3× the quota. The fix is billing, not waiting: keep the demo laptop's `GEMINI_API_KEY` on a
+  billed project with prepay credit ([aistudio.google.com/billing](https://aistudio.google.com/billing)
+  → Buy credits, US$10 min, minutes to land). Postpay is Tier-3-gated and disabled — prepay only.
 - **Gemini down** → the demo is over. Keep a recorded run on disk.
 
 ## The opening and closing lines
