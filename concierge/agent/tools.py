@@ -73,6 +73,13 @@ class _Adapter:
     def resolves_none_itself(self) -> bool:
         return self._fn["resolve_variant"].__name__ == "try_resolve_variant"
 
+    def bind_too_far(self, sink: list[dict[str, Any]] | None) -> None:
+        """Optional on a backend — stubs has no size ceiling. By name, not by import:
+        agent/ still does not depend on commerce/."""
+        fn = getattr(self._impl, "bind_too_far", None)
+        if fn is not None:
+            fn(sink)
+
     async def get_taxonomy(self) -> list[dict[str, str]]:
         return await self._fn["get_taxonomy"]()
 

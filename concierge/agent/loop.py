@@ -583,6 +583,24 @@ def _candidate(p: CatalogProduct) -> dict[str, Any]:
     }
 
 
+_STEP_WORD = {1: "one size", 2: "two sizes", 3: "three sizes", 4: "four sizes"}
+
+
+def _too_far_reason(slot: str, too_far: list[dict[str, Any]]) -> str:
+    """A slot lost to the size ceiling reads as a card that silently vanished unless
+    the reason travels with it. Built from data — no size is named that was not
+    actually offered."""
+    if not too_far:
+        return slot
+    worst = min(too_far, key=lambda r: r["steps"])
+    gap = _STEP_WORD.get(int(worst["steps"]), f"{worst['steps']:.0f} sizes")
+    return (
+        f"{slot} — you asked for {worst['requested']}, and the closest size in stock is "
+        f"{worst['offered']}, {gap} away. I left it out rather than sell you a fit that "
+        "will not work."
+    )
+
+
 async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
     attributed = {ph for hs in session.slot_products.values() for ph in hs}
     grouped: dict[str, Any] = {
@@ -607,6 +625,10 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
     )
     selection = r.parsed if isinstance(r.parsed, _Selection) else _Selection()
 
+    too_far: list[dict[str, Any]] = []
+    backend = tools.backend()
+    backend.bind_too_far(too_far)
+
     party = max(1, session.profile.party_size if session.profile else 1)
     per_person = {s.name: s.per_person for s in session.slots}
     # Counted per SLOT, not per pick: a party is usually split across two picks for the
@@ -614,9 +636,12 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
     person_seq: dict[str, int] = {}
     items: list[KitItem] = []
     unservable = list(selection.unservable_slots)
-    backend = tools.backend()
+    reasons: dict[str, str] = {}
 
     for pick in selection.picks:
+        # Per pick, or a refused slot inherits another slot's rejected size in its
+        # explanation.
+        too_far.clear()
         product = session.catalog.get(pick.product_handle)
         if product is None:
             # The model named something it never retrieved. Nothing prose-only
@@ -662,6 +687,12 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
 
         if not by_variant:
             emit("guardrail.out_of_stock", {"slot": pick.slot, "handle": product.handle}, level="guardrail")
+            # A slot lost to the size ceiling would otherwise vanish from the kit with
+            # no reason anywhere the customer looks. Recorded against the slot NAME so
+            # the "another pick filled it" filter below still works; the sentence is
+            # substituted in at the end.
+            if too_far:
+                reasons[pick.slot] = _too_far_reason(pick.slot, too_far)
             unservable.append(pick.slot)
             continue
 
@@ -691,12 +722,13 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
         if verdict.rejected:
             unservable.append(pick.slot)
 
+    backend.bind_too_far(None)
     items = _merge_variants(items)
     filled = {i.slot for i in items}
     for slot in session.slots:
         if slot.name not in filled:
             unservable.append(slot.name)
-    unservable = [s for s in dict.fromkeys(unservable) if s not in filled]
+    unservable = [reasons.get(s, s) for s in dict.fromkeys(unservable) if s not in filled]
     kit = Kit(items=items, unservable_slots=unservable, budget_minor=_budget_minor(session))
     emit(
         "kit.built",
@@ -876,6 +908,150 @@ async def run_turn(user_message: str, session: ConversationSession) -> TurnResul
     return result
 
 
+# Deliberately NOT ui.demo_data.sizes_in: agent/ importing the fixture module would put
+# it on the live path, and this one has to be narrower anyway. `_NOT_A_UNIT` is the
+# budget parser's lookahead, so "2 nights" and "3800 m" are not sizes here either.
+# Single letters stay uppercase-only — the lone "s" in "my sizes are" is not a small.
+_SIZE_TOKEN = re.compile(rf"\b(XXS|XXL|3XL|2XL|XS|XL|[SML]|\d{{1,2}}(?:\.\d)?{_NOT_A_UNIT})\b")
+_SIZE_CUE = re.compile(r"\b(sizes?|sized|talla s?|talla|fits?|wear|i'?m an?|men'?s|women'?s)\b", re.I)
+# Any of these and the customer wants different PRODUCTS, not a different size.
+_CHANGE_INTENT = re.compile(
+    r"\b(cheaper|cheapest|different|another|other|instead|swap|replace|remove|drop|add|rather|else)\b",
+    re.I,
+)
+
+
+def _size_tokens(message: str) -> list[str]:
+    return [m.group(1) for m in _SIZE_TOKEN.finditer(message)]
+
+
+def _wants_resize(session: ConversationSession, message: str, result: TurnResult) -> list[str]:
+    """Size tokens when this turn is unambiguously a size answer, else []. Every
+    uncertainty returns [] and the caller falls through to a full rebuild — slow and
+    sometimes re-picks, but it has never looked broken on stage."""
+    if result.intent != "clarify" or session.kit is None or not session.kit.items:
+        return []
+    if not any(not i.size_confirmed or i.size_substituted for i in session.kit.items):
+        return []
+    if _CHANGE_INTENT.search(message):
+        return []
+    tokens = _size_tokens(message)
+    if not tokens:
+        return []
+    # A bare "XL" is a size answer. A longer sentence has to say that it is one.
+    return tokens if (_SIZE_CUE.search(message) or len(message.split()) <= 4) else []
+
+
+async def _resize(
+    session: ConversationSession, user_message: str, result: TurnResult
+) -> TurnResult | None:
+    """Re-resolve the VARIANTS of the products already chosen. Zero model calls."""
+    tokens = _wants_resize(session, user_message, result)
+    if not tokens:
+        return None
+
+    kit = session.kit
+    assert kit is not None  # _wants_resize checked it
+    # variant_gid, not product_url: the MCP path's URL is server-supplied and can
+    # differ from the feed's for the same product, while the feed's variant id IS the
+    # MCP variant GID.
+    by_variant = {v.variant_gid: p for p in session.catalog.values() for v in p.variants}
+    if any(i.variant_id not in by_variant for i in kit.items):
+        return None
+    # A folded line lost which person wanted what, so two sizes cannot be split back
+    # across it. One size for everyone is still safe.
+    if len(set(tokens)) > 1 and any(len(i.person_indexes) > 1 for i in kit.items):
+        return None
+
+    emit("size.answer", {"tokens": tokens})
+    backend = tools.backend()
+    per_person = {s.name: s.per_person for s in session.slots}
+    raws: list[dict[str, Any]] = []
+    changed: list[tuple[str, str, str]] = []
+
+    for item in kit.items:
+        product = by_variant[item.variant_id]
+        resolved = None
+        for token in tokens:
+            candidate = await backend.resolve_variant(product, token)
+            if candidate is None:
+                continue
+            if not candidate.substituted:
+                resolved = candidate
+                break
+            # A substitution that did not move the label means the token is not on
+            # this product's ladder at all — "XL" against trousers sized W24 L30 falls
+            # through to first-available, which is the line we already had. Taking it
+            # would flag an untouched line as a substitution the customer never caused.
+            if candidate.size_label != item.size_label:
+                resolved = resolved or candidate
+
+        personal = per_person.get(item.slot, True)
+        sized = personal and len([v for v in product.variants if v.available]) > 1
+        if resolved is None:
+            raws.append(item.model_dump())
+            continue
+        if resolved.size_label != item.size_label:
+            changed.append((item.product_title, item.size_label, resolved.size_label))
+            emit(
+                "variant.resolved",
+                {
+                    "product": item.product_title,
+                    "was": item.size_label,
+                    "now": resolved.size_label,
+                    "source": "customer_size",
+                },
+            )
+        raws.append(
+            {
+                **item.model_dump(),
+                "variant_id": resolved.variant_gid,
+                "size_label": resolved.size_label,
+                "price_minor": resolved.price_minor,
+                "available": resolved.available,
+                "size_substituted": resolved.substituted,
+                # Derived, never carried over: a product down to one variant is no
+                # longer a size we should be asking about.
+                "size_confirmed": resolved.requested_size is not None or not sized,
+            }
+        )
+
+    verdict = check_stock(raws)
+    if verdict.rejected:
+        return None
+
+    items = _merge_variants(verdict.items)
+    # Copied, never recomputed: recomputing turns "we could not read that collection"
+    # into "not stocked", which is an inventory claim we have not earned.
+    unservable = list(session.unservable_slots)
+    kit = Kit(items=items, unservable_slots=unservable, budget_minor=_budget_minor(session))
+    still = check_size_confirmation(kit.items)
+    emit(
+        "guardrail.size_confirmed",
+        {"applied": len(changed), "still_unconfirmed": len(still)},
+        level="guardrail",
+    )
+    emit("kit.assembled", {"items": len(items), "substitutions": sum(i.size_substituted for i in items)})
+
+    session.kit, session.unservable_slots = kit, unservable
+    if changed:
+        lines = "\n".join(f"• {t}: {was} → {now}" for t, was, now in changed)
+        body = f"Same kit, new sizes — I only changed what you asked about.\n\n{lines}"
+    else:
+        body = (
+            "None of those sizes are stocked for the lines I was waiting on, so I have "
+            "changed nothing rather than putting you in a size that does not exist."
+        )
+
+    result.kit, result.unservable_slots = kit, unservable
+    result.profile, result.slots = session.profile, session.slots
+    result.citations = session.citations
+    result.offer_cart = bool(kit.items)
+    result.stage = "kit"
+    result.text = f"{body}\n\n{_disclosures(kit, session.unchecked_slots)}".strip()
+    return result
+
+
 async def _continue(session: ConversationSession, user_message: str, result: TurnResult) -> TurnResult:
     if session.profile is None:
         session.trip_message = user_message
@@ -883,6 +1059,13 @@ async def _continue(session: ConversationSession, user_message: str, result: Tur
         session.profile = await _profile(session, user_message)
     elif session.questions_asked:
         session.answers.append(user_message)
+
+    # Answering "my size is XL" used to re-run _retrieve and _select, and _select
+    # re-picks from scratch: observed live, a cycling jacket came back as a HIKING
+    # jacket and $99.99 became $248.99 because the customer gave a size. Only after
+    # the answer is filed, so the fall-through path still sees it.
+    if (fast := await _resize(session, user_message, result)) is not None:
+        return fast
 
     # Each stage is skipped only if it actually completed, so a turn that died
     # partway — a storefront 429 during slot planning is the observed case —

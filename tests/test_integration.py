@@ -1004,6 +1004,17 @@ class TestTheUiSaysWhenItIsBeingRateLimited:
         assert len(set(seen)) > 1, f"the caption never moved: {seen}"
         assert "Reading the conditions…" not in seen[1:]
 
+    def test_the_model_backing_off_is_not_blamed_on_decathlon(self):
+        """Three Gemini 503 retries in one observed run cost ~30 s, ~10 s and ~18 s of
+        silence — model.retry was in neither status map."""
+        mod, state = self._state()
+
+        state._drain([self._ev("model.retry")])
+
+        assert state.throttled is True, "a 30 s wait must get the amber treatment"
+        assert "Decathlon" not in state.status, f"Decathlon did not do this: {state.status!r}"
+        assert "model" in state.status.lower()
+
     def test_a_rate_limit_still_outranks_the_stage_caption(self):
         """Being rate-limited is the more important thing to be saying, and a later
         routine step must not quietly overwrite it."""
@@ -1023,7 +1034,7 @@ class TestTheUiSaysWhenItIsBeingRateLimited:
         import re
 
         mod, _ = self._state()
-        for text in (mod._RETRYING, mod._DEGRADED):
+        for text in (mod._RETRYING, mod._DEGRADED, mod._MODEL_BUSY):
             assert not re.search(r"\d", text), f"no countdown we cannot keep: {text!r}"
 
     def test_it_keys_on_events_that_are_actually_emitted(self):
@@ -1034,7 +1045,13 @@ class TestTheUiSaysWhenItIsBeingRateLimited:
         mod, _ = self._state()
         emitted = "".join(
             inspect.getsource(_mod(m))
-            for m in ("concierge.commerce.catalog", "concierge.commerce.ucp", "concierge.agent.loop")
+            for m in (
+                "concierge.commerce.catalog",
+                "concierge.commerce.ucp",
+                "concierge.agent.loop",
+                # model.retry lives here, and the map is no longer Decathlon-only.
+                "concierge.agent.classify",
+            )
         )
         for event in mod._THROTTLE_STATUS:
             assert f'"{event}"' in emitted, (
@@ -1159,6 +1176,223 @@ class TestAQuotaFailureIsNotAStackTrace:
         src = Path("concierge/state.py").read_text(encoding="utf-8")
         assert 'self.error = f"{type(exc).__name__}: {exc}"' not in src
         assert 'self.error = f"Cart creation failed — {type(exc).__name__}' not in src
+
+
+class TestASizeAnswerDoesNotRebuildTheKit:
+    """Observed live: the customer typed "My size is XL in both" and got a HIKING
+    jacket where a cycling jacket had been, and $248.99 where $99.99 had been. They
+    asked for a size and were handed a different kit."""
+
+    @staticmethod
+    def _session(monkeypatch, *, unconfirmed=True, slot_name="rain_shell"):
+        loop = _mod("concierge.agent.loop")
+        catalog = _mod("concierge.commerce.catalog")
+        tools = _mod("concierge.agent.tools")
+        from concierge.domain.models import GearSlot, Kit, KitItem
+        from tests.conftest import catalog as reference
+
+        catalog._resolved_cache.clear()
+        tools.set_backend(catalog)
+
+        # A real fleece from the dumped feed, with several in-stock sizes.
+        product = next(
+            p
+            for p in reference("hiking-fleeces-mid-layers")
+            if len([v for v in p.variants if v.available]) > 2
+        )
+        variant = next(v for v in product.variants if v.available)
+        item = KitItem(
+            slot=slot_name,
+            product_title=product.title,
+            product_url=product.product_url,
+            image_url=product.image_url,
+            variant_id=variant.variant_gid,
+            size_label=variant.size_label,
+            price_minor=variant.price_minor,
+            quantity=1,
+            available=True,
+            size_confirmed=not unconfirmed,
+            rationale="keeps you warm",
+        )
+        session = loop.ConversationSession(
+            questions_asked=True,
+            # Without a profile, `_continue` takes the research branch and calls Gemini.
+            profile=_profile(party_size=1),
+            trip_message="two nights in the páramo",
+            slots=[GearSlot(name=slot_name, rationale="cold", collection_handles=["x"])],
+            catalog={product.handle: product},
+            kit=Kit(items=[item], unservable_slots=[], budget_minor=None),
+        )
+
+        async def boom(*a, **k):
+            raise AssertionError("_select must not run for a size answer")
+
+        monkeypatch.setattr(loop, "_select", boom)
+        monkeypatch.setattr(loop, "_retrieve", boom)
+        return loop, session, product, item
+
+    def _result(self, intent="clarify"):
+        loop = _mod("concierge.agent.loop")
+        return loop.TurnResult(intent=intent)
+
+    async def test_the_products_do_not_change_when_only_a_size_was_given(self, monkeypatch):
+        loop, session, product, before = self._session(monkeypatch)
+        target = next(
+            v.size_label for v in product.variants if v.available and v.size_label != before.size_label
+        )
+        token = target.rsplit("/", 1)[-1].strip()
+
+        out = await loop._continue(session, f"My size is {token}", self._result())
+
+        assert out is not None and out.stage == "kit"
+        after = out.kit.items[0]
+        assert after.product_title == before.product_title
+        assert after.product_url == before.product_url
+        assert after.image_url == before.image_url
+        assert after.size_label != before.size_label, "the size was supposed to change"
+        assert after.size_confirmed is True
+
+    async def test_asking_for_something_cheaper_still_rebuilds(self, monkeypatch):
+        loop, session, _, _ = self._session(monkeypatch)
+        with pytest.raises(AssertionError, match="_select must not run"):
+            await loop._continue(session, "give me something cheaper in L", self._result())
+
+    @pytest.mark.parametrize(
+        "message",
+        ["make it 3 people", "we're staying 2 nights", "around 3800 m", "we're leaving on Friday"],
+    )
+    async def test_a_number_that_is_not_a_size_falls_through(self, monkeypatch, message):
+        loop, session, _, _ = self._session(monkeypatch)
+        with pytest.raises(AssertionError, match="_select must not run"):
+            await loop._continue(session, message, self._result())
+
+    async def test_a_new_trip_falls_through_even_with_a_size_in_it(self, monkeypatch):
+        """classify fails OPEN to activity_kit, so the gate must not be the only guard."""
+        loop, session, _, _ = self._session(monkeypatch)
+        with pytest.raises(AssertionError, match="_select must not run"):
+            await loop._continue(session, "My size is L", self._result(intent="activity_kit"))
+
+    async def test_a_kit_with_nothing_left_to_confirm_falls_through(self, monkeypatch):
+        loop, session, _, _ = self._session(monkeypatch, unconfirmed=False)
+        with pytest.raises(AssertionError, match="_select must not run"):
+            await loop._continue(session, "My size is L", self._result())
+
+    async def test_a_cold_catalog_falls_through_instead_of_dropping_the_line(self, monkeypatch):
+        loop, session, _, _ = self._session(monkeypatch)
+        session.catalog = {}
+        with pytest.raises(AssertionError, match="_select must not run"):
+            await loop._continue(session, "My size is L", self._result())
+
+    async def test_unservable_slots_are_carried_through_not_recomputed(self, monkeypatch):
+        """Recomputing turns "we could not read that collection" into "not stocked"."""
+        loop, session, product, before = self._session(monkeypatch)
+        session.unservable_slots = ["Bike Helmet"]
+        session.unchecked_slots = ["Bike Helmet"]
+        token = next(
+            v.size_label.rsplit("/", 1)[-1].strip()
+            for v in product.variants
+            if v.available and v.size_label != before.size_label
+        )
+
+        out = await loop._continue(session, f"My size is {token}", self._result())
+
+        assert out.kit.unservable_slots == ["Bike Helmet"]
+
+    async def test_a_budget_in_the_same_message_is_still_picked_up(self, monkeypatch):
+        loop, session, product, before = self._session(monkeypatch)
+        token = next(
+            v.size_label.rsplit("/", 1)[-1].strip()
+            for v in product.variants
+            if v.available and v.size_label != before.size_label
+        )
+
+        out = await loop._continue(session, f"my size is {token}, keep it under $900", self._result())
+
+        assert out.kit.budget_minor == 90_000
+
+    async def test_a_size_nobody_stocks_changes_nothing_and_says_so(self, monkeypatch):
+        loop, session, _, before = self._session(monkeypatch)
+
+        out = await loop._continue(session, "my size is 47.5", self._result())
+
+        assert out.kit.items[0].size_label == before.size_label
+        assert "changed nothing" in out.text
+
+    async def test_a_token_off_this_products_ladder_leaves_the_line_alone(self, monkeypatch):
+        """Trousers are sized "W24 L30". "XL" is not on that ladder, so resolution falls
+        through to first-available — the line we already had — and taking it would flag
+        an untouched line as a substitution the customer never caused."""
+        loop = _mod("concierge.agent.loop")
+        catalog = _mod("concierge.commerce.catalog")
+        tools = _mod("concierge.agent.tools")
+        from concierge.domain.models import GearSlot, Kit, KitItem
+        from tests.conftest import catalog as reference
+
+        catalog._resolved_cache.clear()
+        tools.set_backend(catalog)
+        pants = next(p for p in reference("apparel-for-the-rain") if "W" in p.variants[0].size_label)
+        v = next(x for x in pants.variants if x.available)
+        item = KitItem(
+            slot="overtrousers", product_title=pants.title, product_url=pants.product_url,
+            image_url=pants.image_url, variant_id=v.variant_gid, size_label=v.size_label,
+            price_minor=v.price_minor, quantity=1, available=True, size_confirmed=False,
+        )
+        session = loop.ConversationSession(
+            questions_asked=True, profile=_profile(party_size=1), trip_message="rain",
+            slots=[GearSlot(name="overtrousers", rationale="rain", collection_handles=["x"])],
+            catalog={pants.handle: pants},
+            kit=Kit(items=[item], unservable_slots=[], budget_minor=None),
+        )
+
+        out = await loop._continue(session, "my size is XL", loop.TurnResult(intent="clarify"))
+
+        after = out.kit.items[0]
+        assert after.size_label == item.size_label
+        assert after.size_substituted is False, "an untouched line was flagged as substituted"
+        assert after.size_confirmed is False, "it must still be asking about this one"
+
+    async def test_it_costs_no_model_call(self, monkeypatch):
+        loop, session, product, before = self._session(monkeypatch)
+        token = next(
+            v.size_label.rsplit("/", 1)[-1].strip()
+            for v in product.variants
+            if v.available and v.size_label != before.size_label
+        )
+        session.model_calls = 7
+
+        await loop._continue(session, f"My size is {token}", self._result())
+
+        assert session.model_calls == 7, "the fast path must not spend a model call"
+
+    async def test_it_speaks_the_same_trace_vocabulary_as_the_fixture(self, monkeypatch, sink):
+        """`state._fixture_resize` established these names. Two vocabularies for one
+        operation would read as two different features in the audit panel."""
+        loop, session, product, before = self._session(monkeypatch)
+        token = next(
+            v.size_label.rsplit("/", 1)[-1].strip()
+            for v in product.variants
+            if v.available and v.size_label != before.size_label
+        )
+
+        await loop._continue(session, f"My size is {token}", self._result())
+
+        names = {e.event for e in sink}
+        assert {"size.answer", "variant.resolved", "guardrail.size_confirmed", "kit.assembled"} <= names
+        resolved = next(e for e in sink if e.event == "variant.resolved")
+        assert set(resolved.payload) == {"product", "was", "now", "source"}
+        assert resolved.payload["source"] == "customer_size"
+
+    def test_both_paths_build_the_same_item_shape(self):
+        """_select and _resize each construct the check_stock dict. A new KitItem field
+        landing on only one of them is the long-term hazard here."""
+        import inspect
+
+        from concierge.domain.models import KitItem
+
+        loop = _mod("concierge.agent.loop")
+        src = inspect.getsource(loop._select)
+        keys = {k for k in KitItem.model_fields if f'"{k}"' in src}
+        assert keys == set(KitItem.model_fields), f"_select no longer sets: {set(KitItem.model_fields) - keys}"
 
 
 class TestSelectionBuildsTheKit:

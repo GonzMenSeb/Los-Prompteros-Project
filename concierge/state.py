@@ -58,11 +58,19 @@ _POLL_INTERVAL = 0.15
 # Retry-After says 60 s and does not honour it — and MCP's is ~48 minutes.
 _RETRYING = "Decathlon is rate-limiting me — easing off and trying again…"
 _DEGRADED = "Decathlon is still rate-limiting me — carrying on with what I could read…"
+# Gemini backs off too, and it is the slower of the two: three 503 retries in one
+# observed run cost ~30 s, ~10 s and ~18 s of silence, because `model.retry` was in
+# neither map. Its own wording — the other two blame Decathlon, which had nothing to
+# do with it. No figure quoted: _BACKOFF is 1/3/7 s per attempt and the real waits
+# were far longer, so either number would be a lie.
+_MODEL_BUSY = "The model is busy — waiting and trying again…"
 
+# Not Decathlon-only: `model.retry` comes from concierge/agent/classify.py.
 _THROTTLE_STATUS = {
     "catalog.rate_limited": _RETRYING,
     "catalog.retry": _RETRYING,
     "ucp.rate_limited": _RETRYING,
+    "model.retry": _MODEL_BUSY,
     "catalog.unavailable": _DEGRADED,
     "catalog.taxonomy_stale": _DEGRADED,
     "ucp.rate_limited_paced": _DEGRADED,

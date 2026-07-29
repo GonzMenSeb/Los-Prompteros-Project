@@ -23,6 +23,7 @@ import difflib
 import random
 import re
 import time
+from contextvars import ContextVar
 from typing import Any
 
 import requests
@@ -412,7 +413,12 @@ def _is_size(name: str) -> bool:
     return "size" in name.casefold()
 
 
-_GARMENT = {"xxs", "2xs", "xs", "s", "m", "l", "xl", "xxl", "2xl", "xxxl", "3xl", "4xl", "5xl"}
+# Ordered, because "nearest available" has to be measurable. Aliases share a rung.
+_GARMENT_RANK = {
+    "xxs": 0, "2xs": 0, "xs": 1, "s": 2, "m": 3, "l": 4,
+    "xl": 5, "xxl": 6, "2xl": 6, "xxxl": 7, "3xl": 7, "4xl": 8, "5xl": 9,
+}
+_GARMENT = frozenset(_GARMENT_RANK)
 
 
 def _is_real_size(label: str) -> bool:
@@ -492,6 +498,70 @@ def _nearest_available(values: list[tuple[str, bool]], start: int) -> int | None
     return None
 
 
+# A refusal has to reach the customer's prose, and the tools adapter deliberately
+# collapses NoStockError to None on the way up. Same shape as obs.trace.bind_sink: the
+# loop binds a list for the turn and drains it after `_select`, so nothing is global
+# and nothing crosses a layer boundary as an argument.
+_too_far: ContextVar[list[dict[str, Any]] | None] = ContextVar("too_far", default=None)
+
+
+def bind_too_far(sink: list[dict[str, Any]] | None) -> None:
+    _too_far.set(sink)
+
+
+def _record_too_far(requested: str, offered: str, steps: float) -> None:
+    sink = _too_far.get()
+    if sink is not None:
+        sink.append({"requested": requested, "offered": offered, "steps": steps})
+
+
+# How far "nearest available" may travel before it stops being a substitution and
+# starts being a different garment. Observed live: an XL request handed an S, disclosed
+# as "check the fit before you order". Both numbers are calibration knobs, not truths —
+# 10.5 -> 11.5 sits EXACTLY on the ceiling, so an EU ladder or third-sizes would need
+# these retuned rather than assumed.
+MAX_SIZE_STEPS = 2
+_RUNG = 0.5  # US sizes step by a half, so 10.5 -> 11.5 is two rungs, not one
+
+
+def _rank(label: str) -> tuple[str, float] | None:
+    """Position on a size ladder, or None when the label is not one — "One Size",
+    a capacity, a height range. Three shapes occur live: a bare number, a bare garment
+    code, and the MT500's whole title, where the code has to be picked out of the parts."""
+    n = _num(label)
+    if n is not None:
+        return "num", n / _RUNG
+    tokens = _parts(label) & _GARMENT
+    # Two garment tokens in one label is not a ladder position worth trusting.
+    return ("garment", float(_GARMENT_RANK[next(iter(tokens))])) if len(tokens) == 1 else None
+
+
+def _substitute(values: list[tuple[str, bool]], requested: str, idx: int) -> tuple[int, bool] | None:
+    """Every substituted exit in `_choose_size` funnels through here.
+
+    Distance is measured in LADDER STEPS, never in list index. The feed groups variants
+    by colour, so the colour boundary sits inside the index space: with
+    Red/S,M,L,XL then Blue/S, a sold-out XL is ONE index from Blue/S and three sizes
+    from it. An index ceiling would have let the reported bug straight through.
+    """
+    want, got = _rank(requested), _rank(values[idx][0])
+    if want is not None and got is not None:
+        # A garment request against a numeric ladder is a category error, not a
+        # far-away size. Refuse it rather than treat it as unmeasurable.
+        steps = abs(want[1] - got[1]) if want[0] == got[0] else float("inf")
+        if steps > MAX_SIZE_STEPS:
+            _record_too_far(requested, values[idx][0], steps)
+            emit(
+                "guardrail.size_too_far",
+                {"requested": requested, "offered": values[idx][0], "steps": steps, "max": MAX_SIZE_STEPS},
+                level="guardrail",
+            )
+            return None
+    # Either rank unmeasurable: allow. Refusing what cannot be measured would make
+    # every "One Size" product unservable for no reason.
+    return idx, True
+
+
 def _choose_size(values: list[tuple[str, bool]], requested: str | None) -> tuple[int, bool] | None:
     if not any(a for _, a in values):
         return None
@@ -504,7 +574,7 @@ def _choose_size(values: list[tuple[str, bool]], requested: str | None) -> tuple
         if values[idx][1]:
             return idx, False
         near = _nearest_available(values, idx)
-        return (near, True) if near is not None else None
+        return _substitute(values, requested, near) if near is not None else None
 
     rn = _num_in(requested)
     if rn is not None:
@@ -513,10 +583,12 @@ def _choose_size(values: list[tuple[str, bool]], requested: str | None) -> tuple
             # Landing on the requested number IS the requested size. Reporting it as a
             # substitution told the customer their in-stock size was sold out.
             best, found = min(numeric, key=lambda p: abs(p[1] - rn))
-            return best, found != rn
+            return (best, False) if found == rn else _substitute(values, requested, best)
 
     offered_a_choice = len(values) > 1 or _is_real_size(values[0][0])
-    return next(i for i, (_, a) in enumerate(values) if a), offered_a_choice
+    first = next(i for i, (_, a) in enumerate(values) if a)
+    # Not a substitution when there was no choice on offer, so no ceiling applies.
+    return _substitute(values, requested, first) if offered_a_choice else (first, False)
 
 
 async def _get_product(gid: str, selected: list[dict[str, str]] | None) -> dict[str, Any]:
