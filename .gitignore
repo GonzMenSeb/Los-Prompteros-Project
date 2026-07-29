@@ -38,5 +38,9 @@ assets/external/
 .idea/
 .DS_Store
 
+# Agent scratch space. `.claude/worktrees/*` are git worktree gitlinks, and a
+# `git add -A` commits them as bare submodule entries that nobody can check out.
+.claude/
+
 # LibreOffice/OpenOffice lock files for an open document
 .~lock.*#
