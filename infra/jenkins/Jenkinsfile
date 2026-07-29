@@ -53,6 +53,11 @@ pipeline {
 
                     // Paths the runtime image is built from. `Dockerfile` never copies
                     // scripts/ or Makefile, so those are test-only.
+                    //
+                    // Matched with =~ (find), NOT ==~ (full match). `==~` requires the WHOLE
+                    // path to match, so a prefix pattern like `^reflex\.lock\/` never matches
+                    // `reflex.lock/bun.lock` and the gate silently answers false — build #4
+                    // skipped a real image change that way, and went green doing it.
                     def imagePaths = ~/^(concierge\/|assets\/|reflex\.lock\/|rxconfig\.py$|Dockerfile$|requirements\.txt$|pytest\.ini$)/
                     def testPaths  = ~/^(tests\/|fixtures\/|scripts\/|Makefile$)/
 
@@ -61,9 +66,13 @@ pipeline {
                         env.RUN_TESTS = 'true'
                         env.RUN_IMAGE = 'true'
                     } else {
-                        env.RUN_IMAGE = changed.any { it ==~ imagePaths } ? 'true' : 'false'
-                        env.RUN_TESTS = (env.RUN_IMAGE == 'true' || changed.any { it ==~ testPaths }) ? 'true' : 'false'
+                        def hitImage = changed.findAll { it =~ imagePaths }
+                        def hitTest = changed.findAll { it =~ testPaths }
+                        env.RUN_IMAGE = hitImage ? 'true' : 'false'
+                        env.RUN_TESTS = (hitImage || hitTest) ? 'true' : 'false'
                         echo "Changed since ${base}:\n  ${changed.join('\n  ')}"
+                        echo "  -> image paths: ${hitImage ?: 'none'}"
+                        echo "  -> test paths:  ${hitTest ?: 'none'}"
                     }
 
                     if (params.FORCE_DEPLOY) {
