@@ -256,7 +256,8 @@ is the stronger provenance anyway. Only revisit if the owner re-publishes it.
 
 ## Open branches, for whoever orchestrates the merge
 
-Two stacked PRs. Merge order matters: **#5 first, then the fixture branch.**
+Two stacked PRs, plus one docs-only branch that is not part of the stack. Merge order
+matters for the stack: **#5 first, then the fixture branch.**
 
 ### PR #5 — `visual-direction-decabot-voice` → `ui-accessibility-and-size-affordance`
 
@@ -287,17 +288,6 @@ Wrapping either in another element silently kills the one authored animation.
 with tracking. That reads like the kicker pattern §3.1 of the brief bans, but it is a
 group divider, not a label over a heading, and it arrived after the brief. Owner's call.
 
-### `demo-readiness-findings` — documentation only
-
-`docs/DEMO-READINESS.md`: a review of where a first-time user breaks this, ordered by
-priority. Three P0s, all of them "the system knows something it does not tell the
-user": an exhausted Gemini quota prints a raw exception on the projector, the status
-line freezes for the whole 52-second first turn, and `my budget is 900` (no `$`)
-silently drops the budget along with the over-budget disclosure.
-
-Nothing in it is fixed. One new file, no code — it will not conflict with anything
-and can merge in any order.
-
 ### `fixture-tells-the-truth` → `visual-direction-decabot-voice`
 
 Found by testing the demo the way a judge would: build the kit, take the cart link,
@@ -308,6 +298,17 @@ and a constant kit on every turn, while `confirm_cart` promised "give me the siz
 and I'll rebuild the kit and hand you a new link". **The live path was always fine** —
 `_continue` appends the answer to `session.answers`, which reaches `SELECT_PROMPT`.
 Only the fixture lied, and the fixture is what runs on stage without Gemini quota.
+
+### `demo-readiness-findings` — documentation only, not part of the stack
+
+`docs/DEMO-READINESS.md`: a review of where a first-time user breaks this, ordered by
+priority. Three P0s, all of them "the system knows something it does not tell the
+user": an exhausted Gemini quota prints a raw exception on the projector, the status
+line freezes for the whole first turn, and `my budget is 900` (no `$`) silently drops
+the budget along with the over-budget disclosure.
+
+Nothing in it is fixed. One new file, no code — it will not conflict with anything
+and can merge in any order.
 
 ## Traps that will cost you an hour if you "fix" them
 
