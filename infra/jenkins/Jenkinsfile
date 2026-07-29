@@ -59,7 +59,7 @@ pipeline {
                     // `reflex.lock/bun.lock` and the gate silently answers false — build #4
                     // skipped a real image change that way, and went green doing it.
                     def imagePaths = ~/^(concierge\/|assets\/|reflex\.lock\/|rxconfig\.py$|Dockerfile$|requirements\.txt$|pytest\.ini$)/
-                    def testPaths  = ~/^(tests\/|fixtures\/|scripts\/|Makefile$)/
+                    def testPaths  = ~/^(tests\/|fixtures\/|scripts\/|infra\/jenkins\/|Makefile$)/
 
                     if (changed == null) {
                         echo 'No known previous successful build — running everything.'
