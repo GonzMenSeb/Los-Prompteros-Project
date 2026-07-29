@@ -462,10 +462,10 @@ class TestRateLimitPacing:
         assert ucp._paced is False
 
 
-def _profile():
+def _profile(**over):
     from concierge.domain.models import ActivityProfile, GroundedValue
 
-    return ActivityProfile(
+    base = dict(
         discipline="trekking",
         environment="desert",
         party_size=1,
@@ -476,6 +476,7 @@ def _profile():
         duration_hours=72.0,
         overnight=True,
     )
+    return ActivityProfile(**{**base, **over})
 
 
 class TestStorefrontBackoff:
@@ -1366,3 +1367,164 @@ class TestPasswordGate:
 
         assert state.walkthrough_stage == 2, "run_walkthrough returned without running"
         assert "never built" in state.error
+
+
+class TestTheKitSaysWhoEachLineIsFor:
+    """A party of two splits across two picks for ONE slot — a women's boot and a men's
+    one — not across two sizes inside one pick, so the person counter has to run per
+    slot rather than per pick. The label then has to survive `_merge_variants`, which
+    folds two people onto a single cart line."""
+
+    def test_two_people_on_one_variant_keep_both_labels(self):
+        """The latent case the fixture does not reach: same product, same size, two
+        people. `_merge_variants` exists because create_cart merges identical variants
+        into one line, so a plain `person_label: str` would have had to drop one of
+        them — and the card would then read as person 1's alone."""
+        loop = _mod("concierge.agent.loop")
+
+        merged = loop._merge_variants(
+            [item(person_labels=["Person 1"]), item(person_labels=["Person 2"])]
+        )
+
+        assert len(merged) == 1, "identical variants are one cart line"
+        assert merged[0].quantity == 2
+        assert merged[0].person_labels == ["Person 1", "Person 2"]
+
+    async def test_each_person_on_a_slot_is_labelled_once(self, monkeypatch):
+        loop = _mod("concierge.agent.loop")
+        catalog = _mod("concierge.commerce.catalog")
+        tools = _mod("concierge.agent.tools")
+        from concierge.domain.models import GearSlot
+        from tests.conftest import catalog as reference
+
+        products = {p.handle: p for p in reference("hiking-boots")}
+        two = list(products)[:2]
+        catalog._resolved_cache.clear()
+
+        selection = loop._Selection(
+            picks=[loop._Pick(slot="boots", product_handle=h, sizes=[]) for h in two]
+        )
+
+        class _Response:
+            parsed = selection
+
+        async def fake_model(session, **kwargs):
+            return _Response()
+
+        monkeypatch.setattr(loop, "_model", fake_model)
+        tools.set_backend(catalog)
+
+        session = loop.ConversationSession(
+            profile=_profile(party_size=2),
+            slots=[GearSlot(name="boots", rationale="peat bog", collection_handles=["hiking-boots"])],
+            catalog=dict(products),
+            slot_products={"boots": list(products)},
+        )
+        kit, _ = await loop._select(session)
+
+        labels = [lbl for i in kit.items for lbl in i.person_labels]
+        assert sorted(labels) == ["Person 1", "Person 2"], (
+            f"one label per person across the slot's picks, got {labels}"
+        )
+
+    async def test_a_solo_trip_is_not_told_whose_boots_these_are(self, monkeypatch):
+        """`party_size=1` has nobody to tell apart, so a "Person 1" heading over the
+        whole kit would be noise rather than information."""
+        loop = _mod("concierge.agent.loop")
+        catalog = _mod("concierge.commerce.catalog")
+        tools = _mod("concierge.agent.tools")
+        from concierge.domain.models import GearSlot
+        from tests.conftest import catalog as reference
+
+        products = {p.handle: p for p in reference("hiking-boots")}
+        catalog._resolved_cache.clear()
+
+        selection = loop._Selection(
+            picks=[loop._Pick(slot="boots", product_handle=next(iter(products)), sizes=[])]
+        )
+
+        class _Response:
+            parsed = selection
+
+        async def fake_model(session, **kwargs):
+            return _Response()
+
+        monkeypatch.setattr(loop, "_model", fake_model)
+        tools.set_backend(catalog)
+
+        session = loop.ConversationSession(
+            profile=_profile(party_size=1),
+            slots=[GearSlot(name="boots", rationale="peat bog", collection_handles=["hiking-boots"])],
+            catalog=dict(products),
+            slot_products={"boots": list(products)},
+        )
+        kit, _ = await loop._select(session)
+
+        assert all(i.person_labels == [] for i in kit.items)
+
+    def test_a_line_covering_both_people_is_shared_not_person_1s(self):
+        """Under a per-person heading it would read as person 1's alone, and listing it
+        under both would show one cart line twice."""
+        state_mod = _mod("concierge.state")
+        state = state_mod.State(_reflex_internal_init=True)
+        state.kit_items = [
+            item(slot="boots", person_labels=["Person 1"]),
+            item(slot="shell", person_labels=["Person 2"]),
+            item(slot="tent", person_labels=[]),
+            item(slot="sleeping_bag", quantity=2, person_labels=["Person 1", "Person 2"]),
+        ]
+
+        cards = state.cards
+        assert len(cards) == 4, "every line renders exactly once"
+        assert [c.person_heading for c in cards] == ["Person 1", "Person 2", "Shared", ""], (
+            "one heading per block, on the first card of the block"
+        )
+        assert [c.slot_label for c in cards[2:]] == ["TENT", "SLEEPING BAG"], (
+            "the shared block is contiguous and last"
+        )
+
+    def test_a_kit_with_nobody_named_gets_no_headings_at_all(self):
+        state_mod = _mod("concierge.state")
+        state = state_mod.State(_reflex_internal_init=True)
+        state.kit_items = [item(slot="boots"), item(slot="tent")]
+
+        cards = state.cards
+        assert len(cards) == 2
+        assert all(c.person_heading == "" for c in cards), (
+            "a party of one has nobody to tell apart — not even a 'Shared' heading"
+        )
+
+    def test_the_kit_grid_still_builds(self):
+        """This is the test that was missing. `kit_groups` was a list of models each
+        holding a list of cards, and the state var for it passed every assertion in
+        Python — but `rx.foreach` cannot type a list field reached through a foreach
+        loop variable, so the page died at compile with a blank screen. Component
+        construction is where that surfaces, so constructing it is the check."""
+        product = _mod("concierge.ui.product")
+        cart = _mod("concierge.ui.cart")
+        chat = _mod("concierge.ui.chat")
+
+        for build in (product.kit_grid, cart.confirm_bar, chat.composer, chat.chat_panel):
+            build()
+
+    def test_the_fixture_gives_each_person_a_size_to_confirm(self):
+        """`make walkthrough` is the only place most people see this. A fixture where
+        only one person has an unconfirmed size cannot show the per-person split."""
+        demo_data = _mod("concierge.ui.demo_data")
+        kit = demo_data.demo_kit()
+
+        owners = {lbl for i in kit.items if not i.size_confirmed for lbl in i.person_labels}
+        assert owners == {"Person 1", "Person 2"}, f"both people must be asked, got {owners}"
+
+    def test_the_note_counts_what_it_is_asking_about(self):
+        state_mod = _mod("concierge.state")
+        state = state_mod.State(_reflex_internal_init=True)
+
+        state.kit_items = [item(slot="boots", size_confirmed=False)]
+        assert "1 item is" in state.unconfirmed_note
+
+        state.kit_items = [
+            item(slot="boots", size_confirmed=False),
+            item(slot="shell", size_confirmed=False),
+        ]
+        assert "2 items are" in state.unconfirmed_note

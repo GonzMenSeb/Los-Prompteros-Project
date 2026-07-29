@@ -487,3 +487,38 @@ The audit's one remaining detector finding — "Inter is an overused font" — i
 verified false positive and stays. Inter is the face Decathlon themselves load, and
 the entire pitch is that this drops into their site unnoticed. The brief outranks
 the saturation warning.
+
+### 2026-07-29 · The guessed size gets a way to answer it, and a name attached to it
+
+The badge told you a size had been guessed and then left you to work out what to do
+about it — the ask was a sentence in the transcript, above a kit several thousand pixels
+long. There is now a "Tell DecaBot my sizes" button in the confirm bar that focuses the
+composer, under a grey line counting what is still generic.
+
+It does **not** gate the cart button. That is the entry above, unchanged: seeing the
+products is what makes the size question answerable, and the cart stays editable. This
+adds the route to answering, not a blocker on the way.
+
+**`KitItem.person_labels` is a list, not a string.** `_merge_variants` folds two people
+onto one cart line when they take the same variant — it exists because `create_cart`
+merges identical variants into one line, and `len(kit.items)` has to keep agreeing with
+`line_count`. A single label would have had to be dropped at that merge, and the card
+would then have read as person 1's alone. Empty means shared kit or a party of one.
+
+**The person counter runs per slot, not per pick.** A party of two splits across two
+picks for one slot — a women's boot and a men's one — not across two sizes inside one
+pick, which is what a per-pick index would have assumed. The labels are positional
+(`Person 1`, `Person 2`) and their stability across slots depends on the model emitting
+picks in a consistent order; it usually does, because it works the slot list in order.
+A wrong-but-consistent grouping is still better than a kit where two people's gear is
+interleaved with nothing saying which is which, but this is the weak point to revisit
+if the model is ever seen shuffling picks within a slot.
+
+Recorded because it will look like a bug to anyone reading the diff: the kit grid is one
+flat `rx.grid` whose person headings are cards carrying a `person_heading`, spanning
+every column via `grid-column: 1 / -1`. The obvious shape — a list of group models each
+holding its cards, nested `rx.foreach` — compiles to a blank page. Reflex cannot type a
+list field reached through a foreach loop variable, and it fails at component
+construction with "Cannot pass a Var to a built-in function". Every state-level
+assertion passed while the page was dead, so `test_the_kit_grid_still_builds` now
+constructs the components the suite had only ever exercised through their state vars.

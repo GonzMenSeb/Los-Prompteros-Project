@@ -245,6 +245,7 @@ def composer() -> rx.Component:
         rx.hstack(
             rx.input(
                 name="message",
+                id="db-composer",
                 placeholder="Describe the trip — where, who with, how long…",
                 size="3",
                 width="100%",

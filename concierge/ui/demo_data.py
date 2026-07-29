@@ -80,6 +80,7 @@ def _kit_item(
     requested_size: str | None = None,
     quantity: int = 1,
     sized: bool = True,
+    person: str = "",
 ) -> KitItem:
     """`requested_size` that is not in stock resolves to the nearest in-stock
     variant and flags the substitution — the same contract as resolve_variant().
@@ -109,6 +110,7 @@ def _kit_item(
         available=True,
         size_substituted=substituted,
         size_confirmed=requested_size is not None or not sized or len(in_stock) == 1,
+        person_labels=[person] if person else [],
         rationale=rationale,
     )
 
@@ -125,29 +127,36 @@ def demo_kit() -> Kit:
                 "Páramo ground is saturated year-round, so the membrane matters more "
                 "than the tread. Asked for a 7; it is not in stock.",
                 requested_size="7",
+                person="Person 1",
             ),
             _kit_item(
                 "waterproof_boots", "hiking-boots", 0,
                 "Same reasoning, men's last. Leather upper survives constant wet better "
                 "than mesh.",
                 requested_size="9",
+                person="Person 2",
             ),
+            # No requested_size here either, so the unconfirmed state lands on BOTH
+            # people rather than only person 2 — which is the case the per-person
+            # grouping exists for, and the one a single-person fixture cannot show.
             _kit_item(
                 "rain_shell", "apparel-for-the-rain", 3,
                 "Drizzle at these elevations is persistent rather than heavy — a "
                 "hardshell you can keep on all day beats a heavier waterproof.",
-                requested_size="S",
+                person="Person 1",
             ),
             _kit_item(
                 "rain_shell", "apparel-for-the-rain", 2,
                 "Lightweight shell; packs down small enough to live in the lid of "
                 "the pack.",
                 requested_size="M",
+                person="Person 2",
             ),
             _kit_item(
                 "mid_layer", "hiking-fleeces-mid-layers", 11,
                 "Overnight lows near 2 °C. The fleece is what makes the shell work.",
                 requested_size="M",
+                person="Person 1",
             ),
             # No requested_size, and this fleece stocks ten. That is the unconfirmed
             # case: DecaBot put a size in the cart because it had to put something
@@ -155,26 +164,31 @@ def demo_kit() -> Kit:
             _kit_item(
                 "mid_layer", "hiking-fleeces-mid-layers", 7,
                 "Warm hiking fleece for camp and the pre-dawn start.",
+                person="Person 2",
             ),
             _kit_item(
                 "base_layer", "base-layers", 11,
                 "Merino next to skin. Cotton is the classic páramo mistake — once it is "
                 "wet it stays wet. One size left in stock.",
+                person="Person 1",
             ),
             _kit_item(
                 "base_layer", "base-layers", 10,
                 "Merino long-sleeve; keeps working when damp and does not need washing "
                 "between days.",
                 requested_size="L",
+                person="Person 2",
             ),
             _kit_item(
                 "backpack", "backpacking-packs", 3,
                 "50 L carries two nights plus a share of the tent without tempting you "
                 "to over-pack.",
+                person="Person 1",
             ),
             _kit_item(
                 "backpack", "backpacking-packs", 0,
                 "70 L for the heavier share — tent body, stove, and the group water.",
+                person="Person 2",
             ),
             _kit_item(
                 "tent", "camping-tents-2-3-person", 0,

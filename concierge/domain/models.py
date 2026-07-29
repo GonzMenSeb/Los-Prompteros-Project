@@ -108,6 +108,11 @@ class KitItem(BaseModel):
     # "first available", which is how a 9.5 foot got a 7. Distinct from
     # `size_substituted`, which is a size that WAS asked for and was sold out.
     size_confirmed: bool = True
+    # Who this line is for, on a per-person slot in a party of more than one. A LIST
+    # because `_merge_variants` folds two people onto one line when they take the same
+    # variant — a single label would have to be dropped or silently overwritten there.
+    # Empty means shared kit (a tent) or a party of one: nobody to distinguish.
+    person_labels: list[str] = Field(default_factory=list)
     rationale: str = ""
 
     @field_validator("variant_id")

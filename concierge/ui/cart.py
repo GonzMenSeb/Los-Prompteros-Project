@@ -102,6 +102,41 @@ def confirm_bar() -> rx.Component:
                 spacing="2",
                 align="center",
             ),
+            # Deliberately does NOT gate the cart button (DECISIONS, 29 Jul): seeing the
+            # products is what makes the size question answerable, and the cart stays
+            # editable. This is the route to answering it, not a blocker on the way.
+            rx.cond(
+                State.has_unconfirmed,
+                rx.vstack(
+                    rx.button(
+                        rx.hstack(
+                            rx.icon("pencil", size=17),
+                            rx.text("Tell DecaBot my sizes", size="2", weight="bold"),
+                            spacing="2",
+                            align="center",
+                        ),
+                        on_click=rx.set_focus("db-composer"),
+                        disabled=State.is_thinking,
+                        variant="outline",
+                        size="3",
+                        width="100%",
+                        min_height="44px",
+                        cursor="pointer",
+                        color=BRAND,
+                        border_radius=RADIUS,
+                        _hover={"background": TINT_2},
+                    ),
+                    rx.text(
+                        State.unconfirmed_note,
+                        size="1",
+                        color=MUTED,
+                        text_align="center",
+                        width="100%",
+                    ),
+                    spacing="2",
+                    width="100%",
+                ),
+            ),
             rx.button(
                 rx.hstack(
                     rx.icon("shopping-cart", size=19),

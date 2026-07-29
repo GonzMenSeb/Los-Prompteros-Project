@@ -504,6 +504,9 @@ def _merge_variants(items: list[KitItem]) -> list[KitItem]:
             merged[item.variant_id] = item
         else:
             seen.quantity += item.quantity
+            # The line now covers both of them. Dropping the incoming label would make
+            # the card read as person 1's alone.
+            seen.person_labels += [p for p in item.person_labels if p not in seen.person_labels]
     return list(merged.values())
 
 
@@ -542,6 +545,9 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
 
     party = max(1, session.profile.party_size if session.profile else 1)
     per_person = {s.name: s.per_person for s in session.slots}
+    # Counted per SLOT, not per pick: a party is usually split across two picks for the
+    # same slot (a women's boot and a men's one), not across two sizes inside one.
+    person_seq: dict[str, int] = {}
     items: list[KitItem] = []
     unservable = list(selection.unservable_slots)
     backend = tools.backend()
@@ -570,13 +576,24 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
         # something to pester them about.
         sized = per_person.get(pick.slot, True) and len([v for v in product.variants if v.available]) > 1
 
-        by_variant: dict[str, tuple[Any, int]] = {}
+        by_variant: dict[str, tuple[Any, int, list[str]]] = {}
         for want in requests:
             resolved = await backend.resolve_variant(product, want)
             if resolved is None:
                 continue
+            # One request is one person on a per-person slot, so this is where a person
+            # gets a name. Shared kit and a party of one leave it empty — there is
+            # nobody to tell apart, and a "Person 1" heading over a solo trip is noise.
+            labels: list[str] = []
+            if per_person.get(pick.slot, True) and party > 1:
+                person_seq[pick.slot] = person_seq.get(pick.slot, 0) + 1
+                labels = [f"Person {person_seq[pick.slot]}"]
             prev = by_variant.get(resolved.variant_gid)
-            by_variant[resolved.variant_gid] = (resolved, (prev[1] if prev else 0) + 1)
+            by_variant[resolved.variant_gid] = (
+                resolved,
+                (prev[1] if prev else 0) + 1,
+                (prev[2] if prev else []) + labels,
+            )
 
         if not by_variant:
             emit("guardrail.out_of_stock", {"slot": pick.slot, "handle": product.handle}, level="guardrail")
@@ -599,9 +616,10 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
                     "available": resolved.available,
                     "size_substituted": resolved.substituted,
                     "size_confirmed": resolved.requested_size is not None or not sized,
+                    "person_labels": labels_,
                     "rationale": pick.rationale[:300],
                 }
-                for resolved, qty in by_variant.values()
+                for resolved, qty, labels_ in by_variant.values()
             ]
         )
         items.extend(verdict.items)

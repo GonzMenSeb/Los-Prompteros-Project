@@ -429,6 +429,38 @@ def kit_summary() -> rx.Component:
     )
 
 
+def _carded(card: KitCard) -> rx.Component:
+    """`rx.fragment` leaves no DOM node, so the heading and the card both land as direct
+    children of the grid — the heading spanning every column, which starts the next
+    person on a fresh row."""
+    return rx.fragment(
+        rx.cond(
+            card.person_heading != "",
+            rx.hstack(
+                rx.icon("user", size=14, color=GREY_3, flex_shrink="0"),
+                rx.text(
+                    card.person_heading,
+                    size="1",
+                    weight="bold",
+                    color=MUTED,
+                    letter_spacing=TRACK_EYEBROW,
+                    # The separator's flex_grow will otherwise take the row and wrap a
+                    # two-word label onto two lines.
+                    white_space="nowrap",
+                    flex_shrink="0",
+                ),
+                rx.separator(flex_grow="1"),
+                spacing="2",
+                align="center",
+                width="100%",
+                grid_column="1 / -1",
+                padding_top="0.35rem",
+            ),
+        ),
+        product_card(card),
+    )
+
+
 def kit_grid() -> rx.Component:
     return rx.cond(
         State.has_kit,
@@ -436,7 +468,7 @@ def kit_grid() -> rx.Component:
             kit_summary(),
             unservable_notice(),
             rx.grid(
-                rx.foreach(State.cards, product_card),
+                rx.foreach(State.cards, _carded),
                 # `lg` is the same breakpoint at which the 384px audit rail moves
                 # beside this column, so three cards here were being asked to share
                 # what was left of a 1024px viewport — roughly 200px each, with the

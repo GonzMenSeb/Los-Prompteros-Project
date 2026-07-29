@@ -150,6 +150,11 @@ class KitCard(BaseModel):
     # A guessed size looked identical to a chosen one on the card, so the only
     # trace of it was a sentence in the chat log that scrolls away.
     size_confirmed: bool
+    # Non-empty on the FIRST card of each person's block, which the grid renders as a
+    # full-width row. The heading rides on the card rather than nesting the cards under
+    # a group model because Reflex cannot type a list field reached through a foreach
+    # loop variable — `rx.foreach(group.items, …)` compiles to a blank page.
+    person_heading: str = ""
     rationale: str
 
 
@@ -287,7 +292,25 @@ class State(rx.State):
 
     @rx.var
     def cards(self) -> list[KitCard]:
-        return [to_card(i) for i in self.kit_items]
+        """Ordered so each person's block is contiguous, carrying its heading on the
+        first card. A line covering two people — one variant, quantity 2 — is shared
+        rather than person 1's: under a per-person heading it would read as theirs
+        alone, and listing it under both would show one cart line twice."""
+        named: dict[str, list[KitItem]] = {}
+        shared: list[KitItem] = []
+        for item in self.kit_items:
+            labels = list(item.person_labels)
+            (named.setdefault(labels[0], []) if len(labels) == 1 else shared).append(item)
+        blocks = [(name, named[name]) for name in sorted(named)]
+        if shared:
+            # No named blocks means a party of one: nobody to tell apart, so the whole
+            # kit is one unheaded run rather than everything filed under "Shared".
+            blocks.append(("Shared" if named else "", shared))
+        return [
+            to_card(item).model_copy(update={"person_heading": label if n == 0 else ""})
+            for label, items in blocks
+            for n, item in enumerate(items)
+        ]
 
     @rx.var
     def total_minor(self) -> int:
@@ -346,6 +369,12 @@ class State(rx.State):
     @rx.var
     def has_unconfirmed(self) -> bool:
         return self.unconfirmed_count > 0
+
+    @rx.var
+    def unconfirmed_note(self) -> str:
+        n = self.unconfirmed_count
+        item = "item is" if n == 1 else "items are"
+        return f"{n} {item} in a generic size because none was specified."
 
     @rx.var
     def walkthrough_active(self) -> bool:
