@@ -8,14 +8,16 @@ Every finding below was measured against the code or the running app. File and l
 references are to the tree at the time of review. Nothing here is a style opinion —
 each item is a place where **the system knows something it does not tell the user.**
 
-This is a findings report, not a plan. Nothing here has been fixed. `DECISIONS.md`
-records calls that were made; this records ones that have not been.
+`DECISIONS.md` records calls that were made; this records ones that had not been.
+
+**Status.** The three P0s were fixed in `tell-the-user-what-broke`. Each is marked
+below. Everything in P1 and P2 is still open.
 
 ---
 
 ## P0 — visible on the projector, breaks the demo
 
-### 1. An exhausted Gemini quota prints a raw exception on screen
+### 1. An exhausted Gemini quota prints a raw exception on screen — FIXED
 
 `agent/loop.py`
 
@@ -44,11 +46,13 @@ quota as *the* bottleneck. This is the single most likely failure of the day, an
 is the worst-presented one. The Decathlon path proves the team already knows how to
 handle a rate limit well — Gemini just was not added to the same list.
 
-**Shape of a fix:** recognise the quota error, say what happened in a sentence, and
-name the operator's escape hatch (fixture mode). Raw exception strings should never
-reach `State.error`; the trace panel is where the detail belongs.
+**Fixed.** The review understated this: `classify()` — the first Gemini call of every
+turn — sat *outside* `run_turn`'s try block, so it was the one call whose failure had
+no written answer at all. It is now guarded, quota is recognised as its own failure
+with its own message naming the fixture escape hatch, and `State.error` no longer
+carries a class name in any path.
 
-### 2. The status line freezes for the whole longest wait
+### 2. The status line freezes for the whole longest wait — FIXED
 
 `state.py` sets it once per turn:
 
@@ -67,10 +71,10 @@ their very first interaction.
 The audit rail *is* updating live — but a person who has never seen this product is
 not reading a log to find out whether it is alive.
 
-**Shape of a fix:** the events already flow through `_drain`. Deriving the status
-line from them costs one mapping and no new plumbing.
+**Fixed.** Derived from the trace already being drained mid-turn. Observed live: 8
+distinct captions across one turn. A throttle message still outranks them.
 
-### 3. The budget silently vanishes on the most natural phrasing
+### 3. The budget silently vanishes on the most natural phrasing — FIXED
 
 Measured by calling the real `_budget_minor` with a session stub:
 
@@ -101,9 +105,12 @@ That matters more than a parsing miss normally would: **over-budget is one of th
 four honesty affordances the product is judged on**, and this is a way to switch it
 off by accident, by typing English.
 
-**Shape of a fix:** widen the pattern, and — more important than any regex — emit a
-guardrail when a number that looks like money is seen but *cannot* be anchored, so
-the failure is loud instead of silent.
+**Fixed**, with a trap worth recording. Widening the anchors made the *opposite*
+failure real, because `trip_message` is part of the searched text: "around 3800 m"
+parsed as a $3800 budget. Two lookaheads stop it — one for units, and one anchoring
+the end of the number, without which the regex simply backtracks to "380" to dodge
+the unit test. Both directions are pinned by tests. A bare number is still not a
+budget, and an unanchorable money mention now emits a guardrail instead of nothing.
 
 ---
 
@@ -202,4 +209,5 @@ say.** They are also all small, and independent of each other.
 2. **Finding 3** — a judge can disable an honesty affordance by accident.
 3. **Finding 2** — the cheapest of the three; the data is already flowing.
 
-Findings 1 and 3 are the two a judge can trigger without meaning to.
+Findings 1 and 3 are the two a judge can trigger without meaning to. All three are
+now closed; P1 and P2 are not.
