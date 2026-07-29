@@ -1,0 +1,259 @@
+pipeline {
+    agent any
+
+    parameters {
+        booleanParam(
+            name: 'RUN_LIVE_TESTS',
+            defaultValue: false,
+            description: 'Run the live contract suite (pytest -m live). Off by default: it hits Decathlon, and MCP recovery is ~48 minutes.'
+        )
+        booleanParam(
+            name: 'FORCE_DEPLOY',
+            defaultValue: false,
+            description: 'Build and deploy even when no image-bearing path changed. Use to re-ship the current main.'
+        )
+    }
+
+    environment {
+        REGISTRY    = 'zot.web.vespiridion.org'
+        IMAGE       = "${REGISTRY}/losprompteros/decabot"
+        VPS_HOST    = 'ubuntu@148.113.172.15'
+        VPS_APP_DIR = '/opt/decabot'
+        APP_URL     = 'https://decabot.web.vespiridion.org'
+    }
+
+    options {
+        disableConcurrentBuilds()
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    stages {
+        // Which stages a commit earns, by what it touched. The offline suite is ~5s, so
+        // the gate is not about test time — it is about not rebuilding the image and
+        // restarting the live instance for a docs-only merge.
+        stage('Scope') {
+            steps {
+                script {
+                    env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+
+                    // NOT `when { branch 'main' }`. That matches on BRANCH_NAME, which only
+                    // a multibranch job sets; in a cpsScm pipelineJob it is undefined, so the
+                    // condition silently never fires and the build goes green having deployed
+                    // nothing. Build #1 did exactly that. Compare refs instead.
+                    def head = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                    def mainRef = sh(returnStdout: true,
+                        script: 'git rev-parse --verify -q refs/remotes/origin/main || true').trim()
+                    env.ON_MAIN = (mainRef && head == mainRef) ? 'true' : 'false'
+
+                    def base = env.GIT_PREVIOUS_SUCCESSFUL_COMMIT
+                    def known = base && sh(returnStatus: true, script: "git cat-file -e ${base}^{commit}") == 0
+                    def changed = known
+                        ? sh(returnStdout: true, script: "git diff --name-only ${base} ${env.GIT_COMMIT}").trim().split('\n') as List
+                        : null
+
+                    // Paths the runtime image is built from. `Dockerfile` never copies
+                    // scripts/ or Makefile, so those are test-only.
+                    //
+                    // Matched with =~ (find), NOT ==~ (full match). `==~` requires the WHOLE
+                    // path to match, so a prefix pattern like `^reflex\.lock\/` never matches
+                    // `reflex.lock/bun.lock` and the gate silently answers false — build #4
+                    // skipped a real image change that way, and went green doing it.
+                    def imagePaths = ~/^(concierge\/|assets\/|reflex\.lock\/|rxconfig\.py$|Dockerfile$|requirements\.txt$|pytest\.ini$)/
+                    def testPaths  = ~/^(tests\/|fixtures\/|scripts\/|infra\/jenkins\/|Makefile$)/
+
+                    if (changed == null) {
+                        echo 'No known previous successful build — running everything.'
+                        env.RUN_TESTS = 'true'
+                        env.RUN_IMAGE = 'true'
+                    } else {
+                        def hitImage = changed.findAll { it =~ imagePaths }
+                        def hitTest = changed.findAll { it =~ testPaths }
+                        env.RUN_IMAGE = hitImage ? 'true' : 'false'
+                        env.RUN_TESTS = (hitImage || hitTest) ? 'true' : 'false'
+                        echo "Changed since ${base}:\n  ${changed.join('\n  ')}"
+                        echo "  -> image paths: ${hitImage ?: 'none'}"
+                        echo "  -> test paths:  ${hitTest ?: 'none'}"
+                    }
+
+                    if (params.FORCE_DEPLOY) {
+                        env.RUN_TESTS = 'true'
+                        env.RUN_IMAGE = 'true'
+                    }
+
+                    echo "sha=${env.GIT_SHA}  onMain=${env.ON_MAIN}  tests=${env.RUN_TESTS}  image=${env.RUN_IMAGE}"
+                    if (env.RUN_TESTS == 'false' && env.RUN_IMAGE == 'false') {
+                        currentBuild.description = "${env.GIT_SHA} — docs only, nothing to do"
+                    } else {
+                        currentBuild.description = env.GIT_SHA
+                    }
+                }
+            }
+        }
+
+        // 276 offline tests, no network and no secrets. HOME lands in the workspace so
+        // pip's wheel cache survives between builds — do not add --no-cache-dir.
+        stage('Test') {
+            when { expression { env.RUN_TESTS == 'true' } }
+            agent {
+                docker {
+                    image 'python:3.12-slim'
+                    reuseNode true
+                    args '-e HOME=${WORKSPACE}/.pip-home'
+                }
+            }
+            steps {
+                sh '''
+                    mkdir -p "$HOME"
+                    export PATH="$HOME/.local/bin:$PATH"
+                    pip install --quiet --user -r requirements.txt
+                    PYTHONPATH=. python -m pytest -m "not live" --junitxml=test-results.xml
+                '''
+            }
+        }
+
+        stage('Live contract tests') {
+            when {
+                allOf {
+                    expression { params.RUN_LIVE_TESTS }
+                    expression { env.RUN_TESTS == 'true' }
+                }
+            }
+            agent {
+                docker {
+                    image 'python:3.12-slim'
+                    reuseNode true
+                    args '-e HOME=${WORKSPACE}/.pip-home'
+                }
+            }
+            steps {
+                sh '''
+                    export PATH="$HOME/.local/bin:$PATH"
+                    PYTHONPATH=. python -m pytest -m live --junitxml=live-results.xml
+                '''
+            }
+        }
+
+        stage('Build & Push') {
+            when {
+                allOf {
+                    expression { env.ON_MAIN == 'true' }
+                    expression { env.RUN_IMAGE == 'true' }
+                }
+            }
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'zot-registry-creds',
+                    usernameVariable: 'REG_USER',
+                    passwordVariable: 'REG_PASS'
+                )]) {
+                    // NOT `docker build` + `docker push` like the sibling repos. Zot rejects
+                    // Docker v2 manifests with 415, and the failure lands at the manifest
+                    // step AFTER every layer uploads successfully. buildx with
+                    // oci-mediatypes=true is the only invocation that works here; the
+                    // provenance/sbom attestations turn the result into an index Zot also
+                    // refuses. See AGENTS.md § Container deployment.
+                    sh '''
+                        echo "$REG_PASS" | docker login $REGISTRY -u "$REG_USER" --password-stdin
+                        docker buildx inspect decabot-builder >/dev/null 2>&1 \
+                          || docker buildx create --name decabot-builder --driver docker-container --bootstrap
+
+                        docker buildx build --builder decabot-builder \
+                            --provenance=false --sbom=false \
+                            --label org.opencontainers.image.revision=$GIT_SHA \
+                            --label org.opencontainers.image.source=https://github.com/GonzMenSeb/Los-Prompteros-Project \
+                            --cache-from type=registry,ref=$IMAGE:buildcache \
+                            --cache-to type=registry,ref=$IMAGE:buildcache,mode=max,oci-mediatypes=true,ignore-error=true \
+                            --output type=image,\\"name=$IMAGE:$GIT_SHA,$IMAGE:latest\\",oci-mediatypes=true,push=true \
+                            .
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy') {
+            when {
+                allOf {
+                    expression { env.ON_MAIN == 'true' }
+                    expression { env.RUN_IMAGE == 'true' }
+                }
+            }
+            steps {
+                sshagent(credentials: ['vps-ssh-key']) {
+                    script {
+                        // Read the outgoing revision off the running image before replacing
+                        // it. This is the rollback target, and it is the same label that
+                        // makes "which commit is live" answerable with `docker inspect`.
+                        env.PREV_SHA = sh(
+                            returnStdout: true,
+                            script: '''
+                                ssh -o StrictHostKeyChecking=no $VPS_HOST \
+                                  "docker inspect --format '{{index .Config.Labels \\"org.opencontainers.image.revision\\"}}' $IMAGE:latest 2>/dev/null || true"
+                            '''
+                        ).trim()
+                        echo "Currently live: ${env.PREV_SHA ?: 'unlabelled (pre-pipeline image)'}"
+
+                        sh '''
+                            ssh -o StrictHostKeyChecking=no $VPS_HOST \
+                              "cd $VPS_APP_DIR && docker compose pull && docker compose up -d"
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Health') {
+            when {
+                allOf {
+                    expression { env.ON_MAIN == 'true' }
+                    expression { env.RUN_IMAGE == 'true' }
+                }
+            }
+            steps {
+                script {
+                    def healthy = sh(returnStatus: true, script: '''
+                        set -e
+                        for i in $(seq 1 20); do
+                            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 $APP_URL/ping || true)
+                            [ "$code" = "200" ] && break
+                            sleep 3
+                        done
+                        [ "$code" = "200" ] || { echo "ping never returned 200 (last: $code)"; exit 1; }
+
+                        # --http1.1 is load-bearing. Traefik negotiates h2 with curl, and
+                        # Connection/Upgrade is an HTTP/1.1 mechanism, so over h2 a healthy
+                        # app answers 400 Invalid websocket upgrade.
+                        curl -s -D - -o /dev/null --http1.1 -N -m 5 \
+                            -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+                            -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+                            "$APP_URL/_event/?EIO=4&transport=websocket" | grep -q '101 Switching Protocols'
+                    ''') == 0
+
+                    if (healthy) {
+                        echo "Live: ${env.GIT_SHA}"
+                        return
+                    }
+                    if (!env.PREV_SHA) {
+                        error 'Health check failed and there is no labelled previous revision to roll back to. Inspect the host.'
+                    }
+                    echo "Health check failed — rolling back to ${env.PREV_SHA}"
+                    sshagent(credentials: ['vps-ssh-key']) {
+                        sh '''
+                            ssh -o StrictHostKeyChecking=no $VPS_HOST \
+                              "docker pull $IMAGE:$PREV_SHA \
+                               && docker tag $IMAGE:$PREV_SHA $IMAGE:latest \
+                               && cd $VPS_APP_DIR && docker compose up -d"
+                        '''
+                    }
+                    error "Health check failed after deploying ${env.GIT_SHA}. Rolled back to ${env.PREV_SHA}."
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            junit allowEmptyResults: true, testResults: '**/test-results.xml,**/live-results.xml'
+            sh 'docker logout $REGISTRY || true'
+        }
+    }
+}
