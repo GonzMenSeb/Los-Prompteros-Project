@@ -619,7 +619,7 @@ class State(rx.State):
                 await _public_gate.acquire()
             try:
                 if FIXTURE_MODE:
-                    async for _ in self._fixture_turn(sink):
+                    async for _ in self._fixture_turn(sink, text):
                         yield
                 else:
                     async for _ in self._live_turn(sink, text):
@@ -645,7 +645,16 @@ class State(rx.State):
             self.throttled = False
         yield
 
-    async def _fixture_turn(self, sink: list[TraceEvent]):
+    async def _fixture_turn(self, sink: list[TraceEvent], text: str):
+        # A follow-up that names a size is a size ANSWER, not a new trip. Replaying
+        # the research trace and the opening kit at that point ignored the customer
+        # outright: DecaBot promised "give me the sizes and I'll rebuild", and the
+        # fixture handed back the same guessed sizes however many times you answered.
+        if self.kit_items and self.unconfirmed_count and demo_data.sizes_in(text):
+            async for _ in self._fixture_resize(sink, text):
+                yield
+            return
+
         for event, payload, level in demo_data.demo_trace():
             emit(event, payload, level)
             await asyncio.sleep(_STEP_DELAY)
@@ -660,6 +669,62 @@ class State(rx.State):
                 citations=[Citation(title=t, url=u) for t, u in demo_data.DEMO_CITATIONS],
             )
         )
+        self.awaiting_confirmation = True
+        yield
+
+    async def _fixture_resize(self, sink: list[TraceEvent], text: str):
+        """Rebuild the demo kit with sizes the customer just gave.
+
+        The tokens are resolved against the same dumped availability grid as the
+        first pass, so a size that is not stocked stays unanswered instead of being
+        invented. Whatever is still unconfirmed after this is reported, not hidden."""
+        answers = demo_data.sizes_in(text)
+        emit("size.answer", {"tokens": answers})
+        await asyncio.sleep(_STEP_DELAY)
+        self._drain(sink)
+        yield
+
+        before = {(i.slot, i.product_title): i.size_label for i in self.kit_items}
+        kit = demo_data.demo_kit(tuple(answers))
+        changed = [
+            (i.product_title, before.get((i.slot, i.product_title)), i.size_label)
+            for i in kit.items
+            if before.get((i.slot, i.product_title)) not in (None, i.size_label)
+        ]
+        for title, was, now in changed:
+            emit("variant.resolved", {"product": title, "was": was, "now": now, "source": "customer_size"})
+            await asyncio.sleep(_STEP_DELAY)
+            self._drain(sink)
+            yield
+
+        self._apply_kit(kit)
+        still = check_size_confirmation(self.kit_items)
+        emit(
+            "guardrail.size_confirmed",
+            {"applied": len(changed), "still_unconfirmed": len(still)},
+            level="guardrail",
+        )
+        emit("kit.assembled", {"items": len(kit.items), "substitutions": self.substitution_count})
+        emit("human.confirmation_required", {"reason": "cart creation is never model-initiated"}, level="guardrail")
+        self._drain(sink)
+        yield
+
+        if changed:
+            lines = "\n".join(f"• {t}: {was} → {now}" for t, was, now in changed)
+            body = f"Updated {len(changed)} line{'s' if len(changed) > 1 else ''}:\n\n{lines}"
+        else:
+            body = (
+                "None of those sizes are stocked for the lines I was waiting on, so I have "
+                "changed nothing rather than putting you in a size that does not exist."
+            )
+        tail = (
+            "\n\nBuild the cart again and you'll get a fresh link with these lines."
+            if changed
+            else ""
+        )
+        if still:
+            tail += "\n\nStill guessing on:\n" + "\n".join(still)
+        self.messages.append(ChatMessage(role="assistant", content=body + tail))
         self.awaiting_confirmation = True
         yield
 
@@ -745,7 +810,9 @@ class State(rx.State):
             if FIXTURE_MODE:
                 emit("ucp.create_cart", {"tool": "create_cart", "source": "fixture"})
                 await asyncio.sleep(_STEP_DELAY * 2)
-                cart = demo_data.demo_cart()
+                # The counts come from the kit actually being confirmed, so a rebuilt
+                # kit produces a cart that agrees with what is on screen.
+                cart = demo_data.demo_cart(list(self.kit_items))
             else:
                 from concierge.commerce.cart import create_cart
 

@@ -536,6 +536,130 @@ That failure shipped green: every state-level assertion passed while the page wa
 and the app has one route, so nothing rendered at all. `make check` never built a
 component. `test_the_kit_grid_still_builds` now does.
 
+### 2026-07-29 · DecaBot gets its own voice, and stops being a drop-in
+
+Two directions were put to the product owner: keep the UI literally drop-in inside
+decathlon.com, or build a visual system that is DecaBot's own on top of Decathlon's
+blue. He chose the second. `theme.py`'s docstring had asserted the drop-in
+constraint since 25 Jul; it now records the change.
+
+The cost is real and accepted: **this is no longer literally drop-in.** The pitch
+loses the line "Decathlon could paste this into their site tomorrow." What it buys
+is a ceiling. decathlon.com is deliberately flat, and matching that flatness is why
+the UI had one surface, one weight band, and hierarchy carried entirely by hue —
+the page had a colour for every kind of message and a shape for none of them. The
+anchor does not move: `#3643BA` is still the only brand hue, and no second one was
+introduced.
+
+Four defaults were removed, each replaced by structure rather than by a new colour.
+
+**The coloured `border-left`.** Eight places — a chat bubble, an error, an
+over-budget line, an under-budget line, a size prompt, an unfilled-slot notice, a
+created cart and every trace row — were the same 3px stripe in a different hue.
+Nothing had structural hierarchy, only saturation. Callouts are now one
+`_disclosure` form (a filled icon medallion on the row's own surface), DecaBot's
+bubbles are told from the user's by elevation, the cart landing is lifted on a top
+edge and a deeper shadow, and a trace verdict is a bordered object where a routine
+step is a bare line. The 2px rule on a product's `rationale` stays: that one is a
+blockquote, which is what it looks like.
+
+**The eyebrow above a heading.** `THE KIT`, `SLOTS DECABOT COULD NOT FILL`,
+`OR START FROM ONE OF THESE` and `SOURCES · GROUNDED WEB SEARCH` are gone or
+absorbed into the sentence they were labelling. `YOU`/`DECABOT` stayed — a
+transcript needs attribution — but as sentence case, because two ALL-CAPS labels per
+exchange is noise. Stat labels above values stayed; a stat label is not a heading.
+The slot kicker above each product title was the one that cost something to remove:
+the slot is real information the title does not carry, so it moved down into the
+card's chip row to stand as data alongside the size and the quantity.
+
+**The hero-metric tile row.** `kit_summary` was big-number-plus-supporting-stats,
+which is a dashboard, at the moment someone decides to spend four figures. It is now
+the bill: the total at display scale, the counts as a ledger strip beneath it, and
+every caveat that qualifies that total — unfilled slots, guessed sizes, an overrun —
+pulled inside the same object instead of scattered down the column. The cards below
+are the line items.
+
+**The same entrance on everything.** `db-rise` fired identically on every chat
+bubble and every trace row, which is a default, not motion design. It is deleted.
+One moment is authored instead — the kit arriving, the payoff beat of the demo —
+resolving out of blur under a `clip-path` wipe on an exponential ease-out, from an
+already-visible default state.
+
+One token group was added, and every value in it was measured, not chosen by eye:
+the audit rail's dark surface. The rail is where a judge watches guardrails fire, so
+it now reads as an instrument rather than as console output. None of the
+light-surface tokens survive the move — `BRAND` is 2.1:1 on the new surface and
+`DANGER` is 2.8:1 — so the rail carries its own set, tinted from the surface hue
+rather than greyed:
+
+| Pair | Ratio |
+|---|---|
+| `RAIL_INK #E8EAF7` on `RAIL_BG #151833` | 14.49:1 |
+| `RAIL_MUTED #A9AFD8` on `RAIL_BG` | 8.11:1 |
+| `RAIL_GUARDRAIL #9AA3F5` on `RAIL_BG` | 7.38:1 |
+| `RAIL_DANGER #FF8B96` on `RAIL_BG` | 7.75:1 |
+| `RAIL_MUTED` on `RAIL_BG_2 #1C2044` | 7.32:1 |
+| `RAIL_BG` on `RAIL_GUARDRAIL` (level pill) | 7.38:1 |
+
+The level pill had to invert: it was white type on the level colour, which is 1.8:1
+once the level colour is a light blue on a dark panel.
+
+Also recorded because it reads as a regression in the diff: the
+`prefers-reduced-motion` block no longer sets `animation-duration: 0.001ms` on
+everything. That blanket kill was itself the bug — it took out the "DecaBot is
+working" pulse, the running-demo progress bar and the kit's arrival, leaving a
+reduced-motion user unable to tell a working app from a frozen one. Reduced motion
+means no vestibular triggers, not no information: the halo becomes a steady ring,
+the progress sweep breathes in place instead of travelling, the kit fades instead of
+rising, and hover/focus transitions are shortened rather than removed.
+
+The detector's one finding — "Inter is an overused font" — remains the same
+adjudicated false positive it was on 25 Jul. Inter is the face Decathlon load, and
+it is the brand anchor's companion. No second face was added: the display register
+is Inter at 800 with `-0.04em`, which costs no extra font request on a projector.
+
+### 2026-07-29 · The fixture stops replaying a kit that ignores you
+
+Found by testing the demo the way a judge would: build the kit, take the cart link,
+then answer the size question DecaBot just asked. Nothing happened. Answering again
+produced a byte-identical turn — same trace, same kit, same guessed sizes.
+
+`_fixture_turn` took no `text` argument. It replayed `demo_trace()` and `demo_kit()`,
+both constants, then appended the same canned message. Meanwhile `confirm_cart`
+appends "Give me the sizes and I'll rebuild the kit and hand you a new link" after
+**both** the fixture and the live branch. So the one mode that runs on stage without
+Gemini quota was making a promise it structurally could not keep.
+
+**The live path was never broken.** `_continue` appends the message to
+`session.answers` (`loop.py`), and `answers` is threaded into `SELECT_PROMPT`, which
+produces `pick.sizes` for `resolve_variant`. The route to a second cart was not
+blocked either: `send_message` calls `_reset_cart()` on every turn, with a comment
+already anticipating exactly this failure. Only the fixture lied.
+
+The fix is not to soften the promise but to keep it. A follow-up naming a size now
+routes to `_fixture_resize` instead of replaying the opening turn, and `demo_kit()`
+takes the answers. **Nothing here fabricates stock:** the tokens resolve through the
+same `_kit_item` path and the same dumped availability grid as the first pass, so
+`XL` fits the fleece that stocks it, `9.5` matches nothing on an apparel line and is
+dropped, and a size nobody stocks leaves the line unconfirmed and says so. Answering
+"9.5 and XL" moves one line and reports the other as still guessed — which is the
+honest outcome, not a failure to handle.
+
+Recorded because it looks like a regression in the diff: **the fixture cart no longer
+reports the numbers in its own dump.** `fixtures/create_cart.json` is a real capture
+of a ONE-line $100 test cart, so rendering its totals printed
+"CART TOTAL $100.00 · LINES 1" directly beneath a $1,305.99 kit — and the visual work
+had just put that kit total at display scale, which made the contradiction louder.
+`demo_cart()` now derives the count and total from the kit that was actually
+confirmed. The id, the link and the expiry still come from the real capture, because
+that link being real is the point of it. The gap that leaves — a genuine link that
+opens one line — is stated in the cart block under fixture mode rather than left for
+a judge to discover on Decathlon's own page.
+
+Turn numbering in `turn.start` reads `turn=3` for the second exchange
+(`len(messages) // 2 + 1` counts an assistant message the fixture appends twice).
+Cosmetic, in the trace only, left alone.
+
 ### 2026-07-29 · Merging to `main` deploys, and every image says which commit it is
 
 The trigger was a bug report that was not a bug. A live turn died on

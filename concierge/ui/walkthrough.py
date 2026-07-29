@@ -117,17 +117,29 @@ def _controls() -> rx.Component:
                     rx.icon("play", size=17),
                     rx.vstack(
                         rx.text(_cta_label(), size="3", weight="bold", line_height="1.2"),
-                        rx.text(_cta_detail(), size="1", opacity="0.85", line_height="1.2"),
+                        # The detail line is a single unbroken run of "·"-joined
+                        # phrases. Left unwrapped it forced the button wider than the
+                        # card it sits in, and at 414px it bled to the viewport edge.
+                        rx.text(
+                            _cta_detail(),
+                            size="1",
+                            opacity="0.85",
+                            line_height="1.3",
+                            white_space="normal",
+                        ),
                         spacing="1",
                         align="start",
+                        min_width="0",
                     ),
                     spacing="3",
                     align="center",
+                    width="100%",
                 ),
                 on_click=State.advance_walkthrough,
                 disabled=State.is_thinking,
                 cursor="pointer",
                 height="auto",
+                max_width="100%",
                 padding="0.7rem 1.1rem",
                 background=BRAND,
                 color=ON_BRAND,
