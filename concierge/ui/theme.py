@@ -1,8 +1,17 @@
-"""Decathlon's own design tokens, read off www.decathlon.com on 25 Jul 2026.
+"""DecaBot's design tokens, anchored on Decathlon's palette but not bounded by it.
 
-The pitch is that Decathlon could drop this concierge straight into their site,
-so the palette is theirs. #3643BA is their primary — it appears on their page as
-`--color-background: rgb(54 67 186)`, not as an incidental hex.
+#3643BA is Decathlon's primary — it appears on their page as
+`--color-background: rgb(54 67 186)`, not as an incidental hex — and it stays the
+anchor. What changed on 29 Jul 2026 is what sits on top of it.
+
+DecaBot was originally built to read as a drop-in inside decathlon.com. **That
+constraint is retired for the visual layer.** decathlon.com is deliberately flat,
+and matching its flatness capped how far this could go: one surface, one type
+scale, hierarchy carried by hue instead of structure. DecaBot now has its own
+voice — an editorial display scale, real depth, and a dark instrument surface for
+the audit rail. The cost, stated plainly: this is no longer literally drop-in.
+It stays harmonious with Decathlon — same blue, same honesty — but their ceiling
+is no longer ours.
 
 #7AFFA7 is their `--color-accent`, but it is a promotional/sale green. Using it
 for "in stock" makes the kit read as a discount banner; SUCCESS is #148558.
@@ -82,6 +91,7 @@ FOCUS_RING = "0 0 0 4px rgba(54,67,186,0.14)"
 
 TRACK_TIGHT = "-0.02em"
 TRACK_TIGHTER = "-0.03em"
+TRACK_DISPLAY = "-0.04em"
 TRACK_EYEBROW = "0.14em"
 
 EASE = "cubic-bezier(0.22,0.61,0.36,1)"
@@ -89,11 +99,30 @@ EASE = "cubic-bezier(0.22,0.61,0.36,1)"
 CONTENT_W = "1040px"
 RAIL_W = "384px"
 
-LEVEL_COLOR = {"info": GREY_1, "guardrail": BRAND, "error": DANGER}
+# --- The audit rail's own surface -------------------------------------------
+# The rail is an instrument, not storefront chrome, so it gets the page's second
+# register: a dark surface mixed from the brand hue rather than neutral black.
+# NONE of the light-surface tokens transfer — BRAND is 2.1:1 here and DANGER is
+# 2.8:1, both invisible. Every value below was measured against RAIL_BG with the
+# helper in docs/VISUAL-BRIEF.md §6, and secondary type is tinted from the
+# surface hue rather than greyed, because grey on indigo reads as dead pixels.
+#
+#   RAIL_INK       on RAIL_BG   14.49:1      RAIL_MUTED  on RAIL_BG    8.11:1
+#   RAIL_GUARDRAIL on RAIL_BG    7.38:1      RAIL_DANGER on RAIL_BG    7.75:1
+#   RAIL_MUTED     on RAIL_BG_2  7.32:1      RAIL_BG on RAIL_GUARDRAIL 7.38:1
+RAIL_BG = "#151833"
+RAIL_BG_2 = "#1C2044"
+RAIL_INK = "#E8EAF7"
+RAIL_MUTED = "#A9AFD8"
+RAIL_GUARDRAIL = "#9AA3F5"
+RAIL_DANGER = "#FF8B96"
+RAIL_LINE = "rgba(232,234,247,0.10)"
+
+LEVEL_COLOR = {"info": RAIL_MUTED, "guardrail": RAIL_GUARDRAIL, "error": RAIL_DANGER}
 LEVEL_BG = {
-    "info": "rgba(35,35,35,0.04)",
-    "guardrail": "rgba(54,67,186,0.08)",
-    "error": "rgba(215,3,34,0.07)",
+    "info": "transparent",
+    "guardrail": "rgba(154,163,245,0.13)",
+    "error": "rgba(255,139,150,0.12)",
 }
 
 SUCCESS_BG = "rgba(20,133,88,0.10)"

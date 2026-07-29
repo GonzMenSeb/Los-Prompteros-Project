@@ -56,6 +56,7 @@ from concierge.ui.theme import (  # noqa: F401
     TINT_1,
     TINT_2,
     TINT_3,
+    TRACK_DISPLAY,
     TRACK_EYEBROW,
     TRACK_TIGHT,
     TRACK_TIGHTER,
@@ -164,53 +165,53 @@ def product_card(item: KitCard) -> rx.Component:
             padding="0.6rem",
             flex_shrink="0",
         ),
-        rx.vstack(
-            _eyebrow(item.slot_label, BRAND),
-            rx.link(
-                rx.text(
-                    item.product_title,
-                    size="3",
-                    weight="bold",
-                    color=TEXT,
-                    line_height="1.35",
-                    letter_spacing=TRACK_TIGHT,
-                    class_name="db-clamp-2",
-                    min_height="2.7em",
-                ),
-                href=item.product_url,
-                is_external=True,
-                text_decoration="none",
-                width="100%",
-                _hover={"color": BRAND},
+        rx.link(
+            rx.text(
+                item.product_title,
+                size="4",
+                weight="bold",
+                color=TEXT,
+                line_height="1.3",
+                letter_spacing=TRACK_TIGHT,
+                class_name="db-clamp-2",
+                min_height="2.6em",
             ),
-            spacing="2",
-            align="start",
+            href=item.product_url,
+            is_external=True,
+            text_decoration="none",
             width="100%",
             padding_top="0.15rem",
+            _hover={"color": BRAND},
+        ),
+        # The slot used to sit above the title as a kicker. It is real information —
+        # which requirement of the trip this product answers — so it moved down to
+        # stand with the card's other facts as one more piece of data, instead of
+        # announcing the heading.
+        rx.flex(
+            _chip("shapes", item.slot_label, BRAND, TINT_1, TINT_2),
+            # The chip changes state rather than moving: a guessed size sits in
+            # exactly the same place as a chosen one, tinted brand instead of
+            # neutral, so scanning a grid of cards shows which rows are answered.
+            rx.cond(
+                item.size_confirmed,
+                _chip("ruler", item.size_label),
+                _chip("ruler", item.size_label, BRAND, TINT_2, TINT_3),
+            ),
+            rx.cond(item.quantity > 1, _chip("x", item.quantity_label)),
+            gap="0.35rem",
+            wrap="wrap",
+            width="100%",
         ),
         rx.hstack(
             # This is a shop: the price is the headline, not a spec row.
             rx.text(
                 item.price_display,
-                size="6",
+                size="7",
                 weight="bold",
                 color=INK,
-                letter_spacing=TRACK_TIGHT,
+                letter_spacing=TRACK_TIGHTER,
                 class_name="db-num",
-            ),
-            rx.spacer(),
-            rx.vstack(
-                # The chip changes state rather than moving: a guessed size sits in
-                # exactly the same place as a chosen one, tinted brand instead of
-                # neutral, so scanning a grid of cards shows which rows are answered.
-                rx.cond(
-                    item.size_confirmed,
-                    _chip("ruler", item.size_label),
-                    _chip("ruler", item.size_label, BRAND, TINT_2, TINT_3),
-                ),
-                rx.cond(item.quantity > 1, _chip("x", item.quantity_label)),
-                spacing="1",
-                align="end",
+                line_height="1",
             ),
             width="100%",
             align="center",
@@ -257,43 +258,69 @@ def product_card(item: KitCard) -> rx.Component:
     )
 
 
+# Every caveat that qualifies the total is one of these. A filled medallion plus
+# the row's own surface carries the tone — five differently-coloured left borders
+# gave a substitution, an error and a budget line the same shape in a new hue, so
+# nothing on the page had structure, only colour.
+def _disclosure(icon: str, fg: str, medallion: str, bg: str, body: rx.Component) -> rx.Component:
+    return rx.hstack(
+        rx.center(
+            rx.icon(icon, size=15, color=fg),
+            width="1.85rem",
+            height="1.85rem",
+            flex_shrink="0",
+            background=medallion,
+            border_radius=RADIUS_SM,
+        ),
+        body,
+        spacing="3",
+        align="start",
+        width="100%",
+        padding="0.7rem 0.85rem",
+        background=bg,
+        border_radius=RADIUS_SM,
+    )
+
+
 def unservable_notice() -> rx.Component:
     return rx.cond(
         State.has_unservable,
-        rx.vstack(
-            rx.hstack(
-                # The yellow is the surface, never the type: #FFCD4E text on a
-                # pale-yellow wash is illegible on a projector.
-                rx.icon("circle-slash", size=16, color=INK),
-                _eyebrow("SLOTS DECABOT COULD NOT FILL", INK),
-                spacing="2",
-                align="center",
+        _disclosure(
+            # The yellow is the surface, never the type: #FFCD4E text on a
+            # pale-yellow wash is illegible on a projector.
+            "circle-slash",
+            INK,
+            WARN,
+            WARN_BG,
+            rx.vstack(
+                rx.text(
+                    "DecaBot could not fill every slot.",
+                    size="2",
+                    weight="bold",
+                    color=INK,
+                    line_height="1.5",
+                ),
+                rx.foreach(
+                    State.unservable_slots,
+                    lambda slot: rx.text(slot, size="2", color=TEXT, line_height="1.6"),
+                ),
+                spacing="1",
+                align="start",
+                width="100%",
             ),
-            rx.foreach(
-                State.unservable_slots,
-                lambda slot: rx.text(slot, size="2", color=TEXT, line_height="1.65"),
-            ),
-            spacing="2",
-            align="start",
-            width="100%",
-            padding="0.95rem 1.1rem",
-            background=WARN_BG,
-            border=f"1px solid {WARN}",
-            border_left=f"3px solid {WARN}",
-            border_radius=RADIUS,
         ),
     )
 
 
-def stat(label: str, value, color: str = TEXT, big: bool = False) -> rx.Component:
+def stat(label: str, value, color: str = TEXT) -> rx.Component:
     return rx.vstack(
         _eyebrow(label),
         rx.text(
             value,
-            size="7" if big else "5",
+            size="5",
             weight="bold",
             color=color,
-            letter_spacing=TRACK_TIGHTER if big else TRACK_TIGHT,
+            letter_spacing=TRACK_TIGHT,
             line_height="1.1",
             class_name="db-num",
         ),
@@ -308,8 +335,11 @@ def budget_line() -> rx.Component:
         State.has_budget,
         rx.cond(
             State.over_budget,
-            rx.hstack(
-                rx.icon("trending-up", size=16, color=DANGER, flex_shrink="0"),
+            _disclosure(
+                "trending-up",
+                WHITE,
+                DANGER,
+                DANGER_BG,
                 rx.text(
                     f"Over your {State.budget_display} budget by {State.budget_delta_display}. "
                     "Nothing has been swapped down to hit the number — tell me what to cut.",
@@ -317,35 +347,21 @@ def budget_line() -> rx.Component:
                     color=TEXT,
                     line_height="1.6",
                 ),
-                spacing="2",
-                align="center",
-                width="100%",
-                padding="0.7rem 0.9rem",
-                background=DANGER_BG,
-                border_left=f"3px solid {DANGER}",
-                border_radius=f"0 {RADIUS_SM} {RADIUS_SM} 0",
             ),
-            rx.hstack(
-                rx.icon("check", size=16, color=SUCCESS, flex_shrink="0"),
+            _disclosure(
+                "check",
+                WHITE,
+                SUCCESS,
+                SUCCESS_BG,
                 rx.text(
                     f"{State.budget_delta_display} under your {State.budget_display} budget.",
                     size="2",
                     color=TEXT,
+                    line_height="1.6",
                 ),
-                spacing="2",
-                align="center",
-                width="100%",
-                padding="0.7rem 0.9rem",
-                background=SUCCESS_BG,
-                border_left=f"3px solid {SUCCESS}",
-                border_radius=f"0 {RADIUS_SM} {RADIUS_SM} 0",
             ),
         ),
     )
-
-
-def _rule() -> rx.Component:
-    return rx.box(width="1px", height="2.4rem", background=GREY_4, flex_shrink="0")
 
 
 def size_prompt() -> rx.Component:
@@ -353,8 +369,11 @@ def size_prompt() -> rx.Component:
     already says this in prose, but prose scrolls away and the cart button does not."""
     return rx.cond(
         State.has_unconfirmed,
-        rx.hstack(
-            rx.icon("ruler", size=16, color=BRAND, flex_shrink="0"),
+        _disclosure(
+            "ruler",
+            ON_BRAND,
+            BRAND,
+            TINT_2,
             rx.text(
                 rx.cond(
                     State.unconfirmed_count > 1,
@@ -366,35 +385,46 @@ def size_prompt() -> rx.Component:
                 color=TEXT,
                 line_height="1.6",
             ),
-            spacing="2",
-            align="center",
-            width="100%",
-            padding="0.7rem 0.9rem",
-            background=TINT_1,
-            border_left=f"3px solid {BRAND}",
-            border_radius=f"0 {RADIUS_SM} {RADIUS_SM} 0",
         ),
     )
 
 
 def kit_summary() -> rx.Component:
+    """The bill, not a dashboard tile row.
+
+    This is the moment a shopper decides to spend four figures, so the total is
+    set at display scale and everything else is subordinate to it: the counts read
+    as a ledger strip underneath, and every caveat that qualifies the number —
+    unfilled slots, guessed sizes, an overrun — sits inside the same object rather
+    than scattered down the page. The cards below are the line items.
+    """
     return rx.vstack(
-        rx.hstack(
-            rx.icon("boxes", size=17, color=BRAND),
-            _eyebrow("THE KIT", TEXT),
-            rx.spacer(),
-            # Every KitItem is `available: Literal[True]` and size-resolved by the
-            # time it reaches here, so this claim is structural, not a promise.
-            # SUCCESS_DEEP, not SUCCESS: on its own 10% tint the brighter green is
-            # 4.08:1, under AA for type this small.
-            _chip("circle-check-big", "IN STOCK", SUCCESS_DEEP, SUCCESS_BG, "transparent"),
-            width="100%",
-            align="center",
+        rx.vstack(
+            rx.hstack(
+                _eyebrow("KIT TOTAL"),
+                rx.spacer(),
+                # Every KitItem is `available: Literal[True]` and size-resolved by
+                # the time it reaches here, so this claim is structural, not a
+                # promise. SUCCESS_DEEP, not SUCCESS: on its own 10% tint the
+                # brighter green is 4.08:1, under AA for type this small.
+                _chip("circle-check-big", "IN STOCK", SUCCESS_DEEP, SUCCESS_BG, "transparent"),
+                width="100%",
+                align="center",
+            ),
+            rx.text(
+                State.total_display,
+                size="9",
+                weight="bold",
+                color=INK,
+                letter_spacing=TRACK_DISPLAY,
+                line_height="1",
+                class_name="db-num",
+            ),
             spacing="2",
+            align="start",
+            width="100%",
         ),
         rx.flex(
-            stat("KIT TOTAL", State.total_display, BRAND, big=True),
-            _rule(),
             stat("ITEMS", State.item_count),
             # These two were rendered unconditionally and read 0 on almost every
             # run. A stat that is always zero trains people to stop reading the row,
@@ -402,30 +432,34 @@ def kit_summary() -> rx.Component:
             # only when it has something to disclose.
             rx.cond(
                 State.substitution_count > 0,
-                rx.fragment(_rule(), stat("SIZE SWAPS", State.substitution_count, WARN_INK)),
+                stat("SIZE SWAPS", State.substitution_count, WARN_INK),
             ),
             rx.cond(
                 State.has_unconfirmed,
-                rx.fragment(_rule(), stat("SIZES TO CONFIRM", State.unconfirmed_count, BRAND)),
+                stat("SIZES TO CONFIRM", State.unconfirmed_count, BRAND),
             ),
-            rx.cond(
-                State.has_budget,
-                rx.fragment(_rule(), stat("BUDGET", State.budget_display, MUTED)),
-            ),
-            gap="1.5rem",
-            align="center",
+            rx.cond(State.has_budget, stat("BUDGET", State.budget_display, MUTED)),
+            gap="0.9rem 2.2rem",
+            align="start",
             wrap="wrap",
             width="100%",
+            padding_top="0.95rem",
+            border_top=f"1px solid {BORDER}",
         ),
-        size_prompt(),
-        budget_line(),
+        rx.vstack(
+            unservable_notice(),
+            size_prompt(),
+            budget_line(),
+            spacing="2",
+            width="100%",
+        ),
         spacing="4",
         width="100%",
-        padding="1.1rem 1.2rem",
+        padding="1.35rem 1.4rem",
         background=WHITE,
         border=f"1px solid {BORDER}",
-        border_radius=RADIUS,
-        box_shadow=SHADOW_SM,
+        border_radius=RADIUS_LG,
+        box_shadow=SHADOW_MD,
     )
 
 
@@ -434,7 +468,6 @@ def kit_grid() -> rx.Component:
         State.has_kit,
         rx.vstack(
             kit_summary(),
-            unservable_notice(),
             rx.grid(
                 rx.foreach(State.cards, product_card),
                 # `lg` is the same breakpoint at which the 384px audit rail moves
@@ -448,5 +481,6 @@ def kit_grid() -> rx.Component:
             ),
             spacing="4",
             width="100%",
+            class_name="db-kit",
         ),
     )

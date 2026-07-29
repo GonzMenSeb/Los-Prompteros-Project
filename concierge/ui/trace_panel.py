@@ -40,6 +40,13 @@ from concierge.ui.theme import (  # noqa: F401
     RADIUS_LG,
     RADIUS_PILL,
     RADIUS_SM,
+    RAIL_BG,
+    RAIL_BG_2,
+    RAIL_DANGER,
+    RAIL_GUARDRAIL,
+    RAIL_INK,
+    RAIL_LINE,
+    RAIL_MUTED,
     RAIL_W,
     SHADOW_BRAND,
     SHADOW_LG,
@@ -71,16 +78,7 @@ def _level_color(row: TraceRow):
         row.level,
         ("guardrail", LEVEL_COLOR["guardrail"]),
         ("error", LEVEL_COLOR["error"]),
-        INK,
-    )
-
-
-def _level_border(row: TraceRow):
-    return rx.match(
-        row.level,
-        ("guardrail", LEVEL_COLOR["guardrail"]),
-        ("error", LEVEL_COLOR["error"]),
-        GREY_4,
+        RAIL_INK,
     )
 
 
@@ -89,7 +87,19 @@ def _level_bg(row: TraceRow):
         row.level,
         ("guardrail", LEVEL_BG["guardrail"]),
         ("error", LEVEL_BG["error"]),
-        "transparent",
+        LEVEL_BG["info"],
+    )
+
+
+# A verdict is an OBJECT on the rail; a routine step is a LINE on it. That is the
+# distinction doing the work at three metres — the hue only confirms it. Colouring
+# both and calling the difference a border makes every row the same shape.
+def _level_edge(row: TraceRow):
+    return rx.match(
+        row.level,
+        ("guardrail", "1px solid rgba(154,163,245,0.34)"),
+        ("error", "1px solid rgba(255,139,150,0.34)"),
+        "1px solid transparent",
     )
 
 
@@ -103,12 +113,13 @@ def trace_row(row: TraceRow) -> rx.Component:
         rx.text(
             row.seq,
             size="1",
-            color=MUTED,
+            color=RAIL_MUTED,
             font_family=MONO,
             width="1.5rem",
             flex_shrink="0",
             text_align="right",
             line_height="1.5",
+            opacity="0.75",
         ),
         rx.vstack(
             rx.hstack(
@@ -133,7 +144,9 @@ def trace_row(row: TraceRow) -> rx.Component:
                         row.level.upper(),
                         size="1",
                         weight="bold",
-                        color=ON_BRAND,
+                        # Dark ink on the light pill. ON_BRAND here is 1.8:1 — the
+                        # pill inverts on a dark surface or it stops being readable.
+                        color=RAIL_BG,
                         font_family=MONO,
                         letter_spacing="0.08em",
                         background=color,
@@ -145,13 +158,17 @@ def trace_row(row: TraceRow) -> rx.Component:
                 width="100%",
                 align="center",
                 spacing="2",
+                # The rail is 384px and event names run long. Without wrapping, the
+                # pill squeezed the name until it broke mid-word — `guardrail.slot_
+                # unserva / ble`. Let the pill drop to its own line instead.
+                wrap="wrap",
             ),
             rx.cond(
                 row.summary != "",
                 rx.text(
                     row.summary,
                     size="1",
-                    color=MUTED,
+                    color=RAIL_MUTED,
                     font_family=MONO,
                     white_space="pre-wrap",
                     word_break="break-word",
@@ -168,9 +185,8 @@ def trace_row(row: TraceRow) -> rx.Component:
         width="100%",
         padding="0.5rem 0.6rem",
         background=_level_bg(row),
-        border_left=f"2px solid {_level_border(row)}",
-        border_radius=f"0 {RADIUS_SM} {RADIUS_SM} 0",
-        class_name="db-rise",
+        border=_level_edge(row),
+        border_radius=RADIUS_SM,
     )
 
 
@@ -184,12 +200,12 @@ def trace_body() -> rx.Component:
             align="start",
         ),
         rx.vstack(
-            rx.icon("activity", size=22, color=GREY_3),
+            rx.icon("activity", size=22, color=RAIL_GUARDRAIL, opacity="0.7"),
             rx.text(
                 "No steps yet. Send a message and every planning step, tool call, "
                 "grounding result and guardrail verdict lands here as it happens.",
                 size="2",
-                color=MUTED,
+                color=RAIL_MUTED,
                 line_height="1.65",
                 text_align="center",
                 max_width="34ch",
@@ -204,20 +220,20 @@ def trace_body() -> rx.Component:
 
 def trace_header() -> rx.Component:
     return rx.hstack(
-        rx.icon("activity", size=16, color=BRAND),
-        rx.text("AUDIT TRAIL", size="2", weight="bold", color=TEXT, letter_spacing=TRACK_EYEBROW),
+        rx.icon("activity", size=16, color=RAIL_GUARDRAIL),
+        rx.text("AUDIT TRAIL", size="2", weight="bold", color=RAIL_INK, letter_spacing=TRACK_EYEBROW),
         rx.text(
             State.trace.length(),
             size="1",
             weight="bold",
-            color=BRAND,
+            color=RAIL_BG,
             font_family=MONO,
-            background=TINT_2,
+            background=RAIL_GUARDRAIL,
             padding="0.1rem 0.45rem",
             border_radius=RADIUS_PILL,
         ),
         rx.spacer(),
-        rx.cond(State.is_thinking, rx.spinner(size="1", color=BRAND)),
+        rx.cond(State.is_thinking, rx.spinner(size="1", color=RAIL_GUARDRAIL)),
         rx.button(
             rx.icon("chevron-right", size=15),
             on_click=State.toggle_trace,
@@ -228,17 +244,18 @@ def trace_header() -> rx.Component:
             min_width="44px",
             min_height="44px",
             cursor="pointer",
-            color=MUTED,
+            color=RAIL_MUTED,
             aria_label="Hide the audit trail",
             aria_expanded="true",
             aria_controls="decabot-trace",
+            _hover={"background": RAIL_BG_2, "color": RAIL_INK},
         ),
         width="100%",
         align="center",
         spacing="2",
         padding="0.8rem 0.9rem",
-        border_bottom=f"1px solid {BORDER}",
-        background=WHITE,
+        border_bottom=f"1px solid {RAIL_LINE}",
+        background=RAIL_BG,
         position="sticky",
         top="0",
         z_index="2",
@@ -271,27 +288,30 @@ def trace_panel() -> rx.Component:
             height=["24rem", "24rem", "24rem", "calc(100vh - 4.5rem)"],
             position=["static", "static", "static", "sticky"],
             top="4.5rem",
-            background=WHITE,
-            border=f"1px solid {BORDER}",
+            background=RAIL_BG,
+            border=f"1px solid {RAIL_BG_2}",
             border_radius=[RADIUS, RADIUS, RADIUS, "0"],
             overflow="hidden",
             flex_shrink="0",
+            class_name="db-rail",
         ),
         rx.box(
             rx.button(
                 rx.icon("activity", size=15),
                 rx.text("Audit trail", size="1", weight="bold", letter_spacing="0.06em"),
                 on_click=State.toggle_trace,
-                variant="outline",
                 size="2",
                 min_height="44px",
                 cursor="pointer",
-                color=BRAND,
-                background=WHITE,
+                # The collapsed control wears the rail's own surface, so what it
+                # opens is legible before it opens.
+                color=RAIL_INK,
+                background=RAIL_BG,
                 border_radius=RADIUS_PILL,
+                padding_x="0.9rem",
                 aria_expanded="false",
                 aria_controls="decabot-trace",
-                _hover={"background": TINT_2},
+                _hover={"background": RAIL_BG_2},
             ),
             padding="1rem 0.9rem",
             flex_shrink="0",

@@ -12,8 +12,14 @@
   --db-tint-1: #f5f6fc;
   --db-tint-2: #e7e8f7;
   --db-tint-3: #d3d8f7;
+  --db-rail-bg: #151833;
+  --db-rail-line: rgba(232, 234, 247, 0.1);
+  --db-rail-thumb: rgba(154, 163, 245, 0.34);
   --db-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --db-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  /* Exponential ease-out. Almost all of the distance is covered in the first
+     third, so the kit reads as arriving rather than as sliding into place. */
+  --db-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 html {
@@ -89,10 +95,41 @@ body {
   overflow: hidden;
 }
 
-@keyframes db-rise {
+.db-balance {
+  text-wrap: balance;
+}
+
+/* ---------------------------------------------------------------------------
+   The one authored moment: the kit arriving.
+
+   Everything used to enter the same way — every chat bubble and every trace row
+   ran the same 340ms rise, which is not motion design, it is a default. The kit
+   landing is the payoff beat of the whole demo, so it is the only thing that gets
+   an entrance, and the entrance is worth watching: the bill resolves out of blur
+   while a clip-path wipes it open from the top. No layout property is touched.
+
+   The default rendered state is the finished one — if this never runs, the kit is
+   simply there. Nothing is invisible waiting on a script.
+   --------------------------------------------------------------------------- */
+@keyframes db-kit-in {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(16px) scale(0.985);
+    filter: blur(12px);
+    clip-path: inset(0 0 46% 0 round 14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+    clip-path: inset(0 0 0 0 round 14px);
+  }
+}
+
+@keyframes db-kit-follow {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -100,8 +137,14 @@ body {
   }
 }
 
-.db-rise {
-  animation: db-rise 340ms var(--db-ease) both;
+.db-kit > :first-child {
+  animation: db-kit-in 660ms var(--db-expo) backwards;
+  will-change: transform, filter, clip-path;
+}
+
+/* The line items are the same beat continuing, not a second one competing. */
+.db-kit > :last-child {
+  animation: db-kit-follow 420ms var(--db-expo) 150ms backwards;
 }
 
 @keyframes db-halo {
@@ -268,15 +311,84 @@ body {
   background-clip: content-box;
 }
 
+/* The rail runs on its own dark surface, so the light-tint scrollbar it inherited
+   read as a scratch down the panel. */
+.db-rail .db-scroll {
+  scrollbar-color: var(--db-rail-thumb) transparent;
+}
+
+.db-rail .db-scroll::-webkit-scrollbar-thumb {
+  background: var(--db-rail-thumb);
+  background-clip: content-box;
+}
+
+.db-rail .db-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(154, 163, 245, 0.55);
+  background-clip: content-box;
+}
+
+/* ---------------------------------------------------------------------------
+   Reduced motion — an alternative, not an off switch.
+
+   The blanket `animation-duration: 0.001ms` this file used to carry destroyed
+   real feedback: the "DecaBot is working" pulse, the running-demo progress bar and
+   the kit's arrival all became indistinguishable from nothing happening. Reduced
+   motion means no vestibular triggers — no travel, no scaling, no sweeping — not
+   no information. Each moment below keeps its meaning and drops its movement.
+   --------------------------------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
   }
+
+  /* The kit still announces itself, by resolving rather than by travelling. */
+  .db-kit > :first-child {
+    animation: db-kit-in-reduced 320ms ease-out backwards;
+    will-change: auto;
+  }
+
+  .db-kit > :last-child {
+    animation: db-kit-in-reduced 260ms ease-out 90ms backwards;
+  }
+
+  @keyframes db-kit-in-reduced {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  /* "Working" stays legible as a steady ring instead of an expanding pulse. */
+  .db-halo {
+    animation: none;
+    box-shadow: 0 0 0 3px rgba(54, 67, 186, 0.45);
+  }
+
+  /* Indeterminate progress still reads as indeterminate — it breathes in place
+     instead of sweeping across, which is the part that triggers. */
+  .db-track::after {
+    inset: 0;
+    width: 100%;
+    background: rgba(255, 255, 255, 0.65);
+    animation: db-track-breathe 1.8s ease-in-out infinite;
+  }
+
+  @keyframes db-track-breathe {
+    0%,
+    100% {
+      opacity: 0.3;
+    }
+    50% {
+      opacity: 0.85;
+    }
+  }
+
+  /* Hover and focus feedback is a state change, not a journey. Kept, shortened. */
   *,
   *::before,
   *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
+    transition-duration: 90ms !important;
   }
 }
