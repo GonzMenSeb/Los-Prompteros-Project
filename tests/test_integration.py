@@ -989,6 +989,33 @@ class TestTheUiSaysWhenItIsBeingRateLimited:
             "and the user is entitled to both"
         )
 
+    def test_the_loading_message_moves_through_the_turn(self):
+        """Turn one is ~52 s of Gemini latency and the caption used to be set once and
+        never move, so a first-timer could not tell working from hung."""
+        mod, state = self._state()
+        state.status, state.throttled = "Reading the conditions…", False
+
+        seen = []
+        for event in ("intent.verdict", "search.grounded", "slots.derived",
+                      "catalog.retrieve", "kit.assembled"):
+            state._drain([self._ev(event)])
+            seen.append(state.status)
+
+        assert len(set(seen)) > 1, f"the caption never moved: {seen}"
+        assert "Reading the conditions…" not in seen[1:]
+
+    def test_a_rate_limit_still_outranks_the_stage_caption(self):
+        """Being rate-limited is the more important thing to be saying, and a later
+        routine step must not quietly overwrite it."""
+        mod, state = self._state()
+
+        state._drain([self._ev("catalog.rate_limited")])
+        throttled_status = state.status
+        state._drain([self._ev("catalog.retrieve")])
+
+        assert state.status == throttled_status
+        assert state.throttled is True
+
     def test_the_messages_promise_no_wait_time(self):
         """Neither surface offers one worth quoting: the storefront advertises 60 s and
         does not honour it, MCP's is ~48 minutes. A countdown we cannot stand behind is
@@ -1039,6 +1066,99 @@ class TestTheUiSaysWhenItIsBeingRateLimited:
         assert normal != warned, "a rate limit should be visible, not just legible"
         assert chat.WARN in warned and chat.WARN not in normal
         assert "takes longer" in warned, "the reassurance line must actually render"
+
+
+class TestTheBudgetSurvivesOrdinaryEnglish:
+    """Over-budget is one of the four honesty affordances. It used to be switchable
+    off by accident: without a `$`, the pattern needed a currency word AFTER the
+    number, so "my budget is 900" parsed to None — and then `has_budget` is false, the
+    BUDGET stat does not render and neither budget disclosure appears."""
+
+    def _session(self, trip="", answers=()):
+        class S:
+            def __init__(self):
+                self.answers = list(answers)
+                self.trip_message = trip
+
+        return S()
+
+    def test_the_phrasings_a_person_actually_uses_parse(self):
+        from concierge.agent.loop import _budget_minor
+
+        for text in (
+            "my budget is $900",
+            "my budget is 900",
+            "keep it under 900",
+            "up to 900",
+            "900 dollars max",
+            "no more than 900 dollars",
+            "I can spend 900 dollars",
+            "presupuesto de 900 dolares",
+        ):
+            assert _budget_minor(self._session(answers=[text])) == 90_000, text
+
+    def test_a_trip_description_is_not_a_budget(self):
+        """`trip_message` is part of the searched text, so loosening the anchors risks
+        reading the trip's own numbers as money. The demo says "around 3800 m"."""
+        from concierge.agent.loop import _budget_minor
+
+        for text in (
+            "we're hiking to around 3800 m elevation",
+            "camping at about 4290 m",
+            "a party of up to 4 people",
+            "up to 6 nights out",
+            "running around 21 km a week",
+            "temperatures around 2 degrees",
+        ):
+            assert _budget_minor(self._session(trip=text)) is None, text
+
+    def test_a_bare_number_is_still_not_a_budget(self):
+        """An unanchored number is a shoe size. That anchoring is the point."""
+        from concierge.agent.loop import _budget_minor
+
+        assert _budget_minor(self._session(answers=["900"])) is None
+
+
+class TestAQuotaFailureIsNotAStackTrace:
+    """`classify` is the first Gemini call of every turn and sat OUTSIDE run_turn's
+    try, so its failure reached State.error, which the page renders verbatim."""
+
+    def test_the_intent_gate_failing_still_returns_a_readable_turn(self, monkeypatch):
+        import asyncio
+
+        from concierge.agent import loop as loop_mod
+
+        class Quota(Exception):
+            code = 429
+
+        async def boom(*a, **k):
+            raise Quota("RESOURCE_EXHAUSTED")
+
+        monkeypatch.setattr(loop_mod, "classify", boom)
+
+        class Session:
+            catalog: dict = {}
+            turns: list = []
+            model_calls = 0
+
+            def transcript(self):
+                return ""
+
+        result = asyncio.run(loop_mod.run_turn("two nights hiking", Session()))
+
+        assert result.stage == "quota"
+        assert "Quota" not in result.text and "429" not in result.text
+        assert "quota" in result.text.lower()
+
+    def test_the_raw_exception_never_becomes_the_page_error(self):
+        """State.error is rendered verbatim by cart.error_block, so a class name and an
+        exception string on it are a stack trace on a projector. Read off the file:
+        State.send_message is a Reflex EventHandler, not an inspectable function."""
+        from pathlib import Path
+
+        src = Path("concierge/state.py").read_text(encoding="utf-8")
+        assert 'self.error = f"{type(exc).__name__}: {exc}"' not in src
+        assert 'self.error = f"Cart creation failed — {type(exc).__name__}' not in src
 
 
 class TestSelectionBuildsTheKit:

@@ -69,6 +69,27 @@ _THROTTLE_STATUS = {
     "guardrail.collection_unchecked": _DEGRADED,
 }
 
+# Turn one is ~52 s of Gemini latency (DECISIONS, 25 Jul). "Reading the conditions…"
+# was set once and then never moved, so a first-time user watched a frozen caption
+# under a spinner for a minute and had no way to tell working from hung. The audit
+# rail was already telling the truth beside it — someone who has never seen this
+# product is not reading a log to find out whether it is alive.
+#
+# Same mechanism as the throttle map above: driven off the drained trace, so it lands
+# WHILE the turn is running. A throttle message outranks these — it is the more
+# important thing to be saying.
+_STAGE_STATUS = {
+    "intent.verdict": "Working out what you're asking for…",
+    "search.grounded": "Researching the real conditions…",
+    "profile.built": "Reading the forecast and the terrain…",
+    "slots.derived": "Working out what the trip demands…",
+    "catalog.retrieve": "Searching Decathlon's live catalog…",
+    "ucp.get_product": "Checking sizes against live stock…",
+    "variant.resolved": "Checking sizes against live stock…",
+    "guardrail.stock": "Checking sizes against live stock…",
+    "kit.assembled": "Putting the kit together…",
+}
+
 # Public-load protection, for when a QR code points a room full of phones at the same
 # tunnel the demo is running on.
 #
@@ -410,6 +431,10 @@ class State(rx.State):
             throttle = _THROTTLE_STATUS.get(ev.event)
             if throttle is not None:
                 self.throttled, self.status = True, throttle
+            elif not self.throttled:
+                stage = _STAGE_STATUS.get(ev.event)
+                if stage is not None:
+                    self.status = stage
         sink.clear()
         return True
 
@@ -630,7 +655,10 @@ class State(rx.State):
         except Exception as exc:
             emit("turn.error", {"error": repr(exc)}, level="error")
             self._drain(sink)
-            self.error = f"{type(exc).__name__}: {exc}"
+            # The class name and the exception text belong in the trace, which is
+            # right there and is where detail is supposed to live. On the page they
+            # are a stack trace on a projector.
+            self.error = "That turn failed before I could finish. The audit trail has the last step that ran."
             self.messages.append(
                 ChatMessage(
                     role="assistant",
@@ -845,7 +873,10 @@ class State(rx.State):
         except Exception as exc:
             emit("cart.error", {"error": repr(exc)}, level="error")
             self._drain(sink)
-            self.error = f"Cart creation failed — {type(exc).__name__}: {exc}"
+            self.error = (
+                "Decathlon would not create the cart just now. Nothing was bought and the kit is "
+                "untouched — press the button again, or check the audit trail for what it returned."
+            )
             self.awaiting_confirmation = True
         finally:
             bind_sink(None)

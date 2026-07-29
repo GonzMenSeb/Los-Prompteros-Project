@@ -128,6 +128,40 @@ def _rate_limited(exc: BaseException) -> bool:
     return type(exc).__name__ in _RATE_LIMITED
 
 
+# Gemini's own quota, a different failure from Decathlon's rate limit and the only one
+# that had no written answer. Keyed on the HTTP code rather than on
+# `google.genai.errors.ClientError` — no import, same reason as _RATE_LIMITED, and it
+# survives the SDK renaming its exception classes. Decathlon's own names are excluded
+# so a storefront 429 keeps the storefront wording.
+def _model_quota(exc: BaseException) -> bool:
+    return getattr(exc, "code", None) == 429 and type(exc).__name__ not in _RATE_LIMITED
+
+
+_QUOTA_TEXT = (
+    "I've run out of Gemini quota for now, so I can't research or pick anything this "
+    "turn — and I'd rather say that than hand you a kit I didn't actually build.\n\n"
+    "Nothing you've told me is lost. If you're running this demo, the fixture replay "
+    "(`CONCIERGE_FIXTURE_MODE=1`) shows the whole flow on a real catalog snapshot "
+    "without spending quota."
+)
+
+_BROKE_TEXT = (
+    "Something broke while I was building that. Tell me the trip again, or adjust it "
+    "slightly, and I'll retry."
+)
+
+
+def _failure(exc: BaseException) -> tuple[str, str]:
+    """(text for the customer, stage). The exception itself goes to the trace, never
+    to the screen — a judge reading `ClientError: 429 RESOURCE_EXHAUSTED {...}` off a
+    projector learns nothing and trusts us less."""
+    if _model_quota(exc):
+        emit("turn.model_quota", {"error": f"{type(exc).__name__}: {exc}"[:400]}, level="error")
+        return _QUOTA_TEXT, "quota"
+    emit("turn.error", {"error": f"{type(exc).__name__}: {exc}"[:400]}, level="error")
+    return _BROKE_TEXT, "error"
+
+
 async def _model(session: ConversationSession, **kwargs: Any) -> types.GenerateContentResponse:
     if session.model_calls >= MAX_MODEL_CALLS:
         emit("guardrail.model_budget", {"calls": session.model_calls}, level="guardrail")
@@ -472,16 +506,46 @@ async def _retrieve(session: ConversationSession, message: str) -> str:
 # ── selection -> Kit, built in code from the cache ──────────────────────────
 
 
+_NUM = r"(\d[\d,]*(?:\.\d{1,2})?)"
+_CURRENCY = r"(?:usd|dollars?|bucks|d[oó]lares)"
+# A trip description is full of numbers that are not money, and `trip_message` is part
+# of the text searched. Without this, the demo's own "around 3800 m" read as a $3800
+# budget. Only the loosely-anchored keyword pattern needs it — the other three are
+# anchored on a currency marker already.
+# The first lookahead is load-bearing: without it the engine simply backtracks the
+# number to dodge the unit test — "3800 m" gives up its last digit and matches as
+# "380", which is a $380 budget instead of no budget at all.
+_NOT_A_UNIT = (
+    r"(?![\d.,])"
+    r"(?!\s*(?:m\b|km|mi\b|ft\b|kg|lb|°|deg|celsius|people|persons?|pax|"
+    r"nights?|days?|hours?|hrs?|weeks?|months?|years?|yrs?))"
+)
+# Anchored three ways, because an unanchored number grabs the first digits in the
+# message and those are a shoe size. Measured misses this widening fixes, all of which
+# used to parse to None and take the whole over-budget disclosure down with them:
+# "my budget is 900", "keep it under 900", "up to 900", "900 dollars max",
+# "no more than 900 dollars", "presupuesto 900 dolares".
+_BUDGET_PATTERNS = (
+    rf"\$\s*{_NUM}",
+    rf"(?:budget|spend|under|up to|max(?:imum)?|no more than|around|about|presupuesto|hasta)"
+    rf"\D{{0,15}}?{_NUM}{_NOT_A_UNIT}",
+    rf"{_NUM}\s*{_CURRENCY}",
+    rf"{_NUM}\s*(?:max|maximum|or less|tops)\b",
+)
+# Only fires when the customer clearly meant money and we still could not anchor it.
+_MONEY_HINT = re.compile(rf"\$|{_CURRENCY}|budget|presupuesto", re.I)
+
+
 def _budget_minor(session: ConversationSession) -> int | None:
-    """Anchored on the currency marker or the word 'budget'. An unanchored number
+    """Anchored on the currency marker or a budget word. An unanchored number
     grabs the first digits in the message, which is a shoe size."""
     text = " ".join(session.answers) + " " + session.trip_message
-    m = re.search(r"\$\s*(\d[\d,]*(?:\.\d{1,2})?)", text) or re.search(
-        r"(?:budget|spend|under|up to|max(?:imum)?)\D{0,15}?(\d[\d,]*(?:\.\d{1,2})?)\s*(?:usd|dollars|bucks)",
-        text,
-        re.I,
-    )
+    m = next((mm for p in _BUDGET_PATTERNS if (mm := re.search(p, text, re.I))), None)
     if not m:
+        # Silence here used to remove the BUDGET stat and both budget disclosures
+        # from the page with nothing said anywhere the customer would look.
+        if _MONEY_HINT.search(text):
+            emit("guardrail.budget_unparsed", {"text": text[:160]}, level="guardrail")
         return None
     try:
         minor = round(float(m.group(1).replace(",", "")) * 100)
@@ -716,7 +780,18 @@ async def run_turn(user_message: str, session: ConversationSession) -> TurnResul
     tools.bind_cache(session.catalog)
     session.turns.append({"role": "user", "text": user_message})
     session.model_calls += 1  # classify() does not route through _model()
-    verdict = await classify(user_message, session.transcript())
+    # The intent gate is the FIRST Gemini call of every turn and used to sit outside
+    # the try below, so it was the one call whose failure had no written answer — it
+    # propagated to State.error and got rendered raw. Quota dies here first.
+    try:
+        verdict = await classify(user_message, session.transcript())
+    except Exception as exc:
+        result = TurnResult()
+        result.text, result.stage = _failure(exc)
+        result.error = f"{type(exc).__name__}: {exc}"[:300]
+        session.turns.append({"role": "assistant", "text": result.text})
+        emit("turn.done", {"intent": result.intent, "stage": result.stage, "model_calls": session.model_calls})
+        return result
 
     result = TurnResult(intent=verdict.intent)
     try:
@@ -788,12 +863,13 @@ async def run_turn(user_message: str, session: ConversationSession) -> TurnResul
             )
             result.stage, result.error = "rate_limited", f"{type(exc).__name__}: {exc}"[:300]
         else:
-            emit("turn.error", {"error": f"{type(exc).__name__}: {exc}"[:400]}, level="error")
-            result.text = (
-                "Something broke while I was building that. Tell me the trip again, or adjust it slightly, "
-                "and I'll retry."
-            )
-            result.stage, result.error = "error", f"{type(exc).__name__}: {exc}"[:300]
+            if _model_quota(exc):
+                # Whatever the turn reached is still on the session, exactly as with a
+                # Decathlon rate limit — this is a pause, not a dead end.
+                result.profile, result.slots = session.profile, session.slots
+                result.citations = session.citations
+            result.text, result.stage = _failure(exc)
+            result.error = f"{type(exc).__name__}: {exc}"[:300]
 
     session.turns.append({"role": "assistant", "text": result.text})
     emit("turn.done", {"intent": result.intent, "stage": result.stage, "model_calls": session.model_calls})
