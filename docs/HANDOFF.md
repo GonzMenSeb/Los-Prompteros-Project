@@ -287,6 +287,17 @@ Wrapping either in another element silently kills the one authored animation.
 with tracking. That reads like the kicker pattern §3.1 of the brief bans, but it is a
 group divider, not a label over a heading, and it arrived after the brief. Owner's call.
 
+### `demo-readiness-findings` — documentation only
+
+`docs/DEMO-READINESS.md`: a review of where a first-time user breaks this, ordered by
+priority. Three P0s, all of them "the system knows something it does not tell the
+user": an exhausted Gemini quota prints a raw exception on the projector, the status
+line freezes for the whole 52-second first turn, and `my budget is 900` (no `$`)
+silently drops the budget along with the over-budget disclosure.
+
+Nothing in it is fixed. One new file, no code — it will not conflict with anything
+and can merge in any order.
+
 ### `fixture-tells-the-truth` → `visual-direction-decabot-voice`
 
 Found by testing the demo the way a judge would: build the kit, take the cart link,
