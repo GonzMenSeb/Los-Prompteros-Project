@@ -33,8 +33,8 @@ suite from GitHub Actions before they land.
 A merge that touches only `*.md`, `docs/`, `LICENSE` or `.github/` builds nothing and
 leaves the running instance alone. Everything else — `concierge/`, `assets/`,
 `reflex.lock/`, `rxconfig.py`, `Dockerfile`, `requirements.txt`, `pytest.ini` — ships.
-`tests/`, `fixtures/`, `scripts/` and `Makefile` run the suite and stop there, because
-the image is not built from them.
+`tests/`, `fixtures/`, `scripts/`, `infra/jenkins/` and `Makefile` run the suite and stop
+there, because the image is not built from them.
 
 **Which commit is live** is a question `docker inspect` answers, because every image
 carries its revision:
