@@ -9,14 +9,16 @@ are to `e766720`, the tree this review was run against. Nothing here is a style
 opinion — each item is a measured place where a first-time user loses something the
 system already had.
 
-This is a findings report, not a plan. Nothing here has been fixed. `DECISIONS.md`
-records calls that were made; this records ones that have not been.
+`DECISIONS.md` records calls that were made; this records ones that had not been.
+
+**Status.** The three P0s were fixed in `tell-the-user-what-broke`. Each is marked
+below. Everything in P1 and P2 is still open.
 
 ---
 
 ## P0 — visible on the projector, breaks the demo
 
-### 1. An exhausted Gemini quota prints a raw exception on screen
+### 1. An exhausted Gemini quota prints a raw exception on screen — FIXED
 
 `agent/loop.py`
 
@@ -46,14 +48,19 @@ records it already being hit on 26 Jul. This is the single most likely failure o
 day, and it is the worst-presented one. The Decathlon path proves the team already
 knows how to handle a rate limit well — Gemini just was not added to the same list.
 
-**Shape of a fix:** recognise the quota error **by status — 429 / `RESOURCE_EXHAUSTED`
-— not by class name**; `_RATE_LIMITED` matches `type(exc).__name__`, and `ClientError`
-also covers 400s and auth failures, which must not get a "switch to fixture mode"
-message. Then say what happened in a sentence and name the operator's escape hatch.
-Raw exception strings should never reach `State.error`; the trace panel is where the
-detail belongs.
+**Fixed.** Quota is recognised **by status — 429 — not by class name**, which matters
+because `_RATE_LIMITED` matches `type(exc).__name__` and `ClientError` also covers
+400s and auth failures that must not get a "switch to fixture mode" message. It has
+its own wording naming the fixture escape hatch, and `State.error` no longer carries a
+class name on any path — the detail belongs in the trace panel.
 
-### 2. The status line freezes for the whole longest wait
+One correction to the first attempt, which claimed quota died at the intent gate and
+wrapped `classify()` in a second handler: it does not. `classify()` catches `Exception`
+itself and returns a fail-safe verdict, so quota never escapes it — it surfaces on the
+next model call, inside the try that already had a written answer. The extra handler
+could only fire if `classify` were replaced, which is what its test did. Removed.
+
+### 2. The status line freezes for the whole longest wait — FIXED
 
 `state.py` sets it once per turn:
 
@@ -71,10 +78,19 @@ not move, for the better part of a minute, on their very first interaction.
 The audit rail *is* updating live — but a person who has never seen this product is
 not reading a log to find out whether it is alive.
 
-**Shape of a fix:** the events already flow through `_drain`. Deriving the status
-line from them costs one mapping and no new plumbing.
+**Fixed.** Derived from the trace already being drained mid-turn. A throttle message
+still outranks the routine captions.
 
-### 3. The budget silently vanishes on the most natural phrasing
+The first attempt did not work outside fixture mode: the table was keyed on
+`ui/demo_data.py`'s event vocabulary, so six of its nine keys had no live emitter and
+the caption still froze through retrieval and sizing — the longest stretch of the turn,
+and the whole point. It is now keyed on what the live pipeline emits (`gate.verdict`,
+`research.grounded`, `catalog.collection`, `ucp.call`, `catalog.variant_resolved`,
+`kit.built`), with the fixture names kept as explicit aliases so the on-stage replay
+still moves. `test_it_keys_on_events_that_are_actually_emitted` now covers both tables
+and ignores `_fixture_*` bodies, which is what let two of the dead keys look alive.
+
+### 3. The budget silently vanishes on the most natural phrasing — FIXED
 
 Measured by calling the real `_budget_minor` with a session stub:
 
@@ -105,9 +121,24 @@ That matters more than a parsing miss normally would: **over-budget is one of th
 four honesty affordances the product is judged on**, and this is a way to switch it
 off by accident, by typing English.
 
-**Shape of a fix:** widen the pattern, and — more important than any regex — emit a
-guardrail when a number that looks like money is seen but *cannot* be anchored, so
-the failure is loud instead of silent.
+**Fixed**, with a trap worth recording. Widening the anchors made the *opposite*
+failure real, and that direction is worse: a miss is silent, but a false positive
+makes the kit disclose an overrun against a figure the customer never gave.
+
+The first attempt fought it with a unit blocklist inside the regex — `m|km|mi|ft|kg|
+lb|people|nights|…`. That cannot close the hole, because it has to name every unit
+anyone might type: `around 3800 meters` still parsed as **$3800**, `about 45 litres`
+as **$45**, `about 30 litre pack` as **$30**. Small ones only escaped notice because
+the pre-existing under-$20 floor swallowed them.
+
+The scope was the actual bug. Only the keyword pattern is loose enough to be fooled,
+and it only needed the trip description because it was reading it — so it now runs
+over `session.answers` alone, while the three currency-marked patterns still read the
+trip. No blocklist. Both directions are pinned, including the units that defeated the
+list. One honest regression: a bare `budget around 900` in the *opening* message now
+returns `None`; the same figure parses with a `$` or the word `dollars`, or said as an
+answer. A bare number is still not a budget, and an unanchorable money mention emits a
+guardrail instead of nothing.
 
 ---
 
@@ -211,4 +242,5 @@ say.** They are also all small, and independent of each other.
 2. **Finding 3** — the vanishing budget.
 3. **Finding 2** — the frozen status line.
 
-Findings 1 and 3 are the two a judge can trigger without meaning to.
+Findings 1 and 3 are the two a judge can trigger without meaning to. All three are
+now closed; P1 and P2 are not.

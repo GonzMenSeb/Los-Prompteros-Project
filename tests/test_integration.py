@@ -989,6 +989,35 @@ class TestTheUiSaysWhenItIsBeingRateLimited:
             "and the user is entitled to both"
         )
 
+    def test_the_loading_message_moves_through_the_turn(self):
+        """Turn one is ~52 s of Gemini latency and the caption used to be set once and
+        never move, so a first-timer could not tell working from hung."""
+        mod, state = self._state()
+        state.status, state.throttled = "Reading the conditions…", False
+
+        # Live event names on purpose. Driven with the fixture trace's names instead,
+        # this passed while a real turn's caption sat frozen through retrieval.
+        seen = []
+        for event in ("gate.verdict", "research.grounded", "slots.derived",
+                      "catalog.collection", "kit.built"):
+            state._drain([self._ev(event)])
+            seen.append(state.status)
+
+        assert len(set(seen)) == len(seen), f"a live stage left the caption unmoved: {seen}"
+        assert "Reading the conditions…" not in seen
+
+    def test_a_rate_limit_still_outranks_the_stage_caption(self):
+        """Being rate-limited is the more important thing to be saying, and a later
+        routine step must not quietly overwrite it."""
+        mod, state = self._state()
+
+        state._drain([self._ev("catalog.rate_limited")])
+        throttled_status = state.status
+        state._drain([self._ev("catalog.collection")])
+
+        assert state.status == throttled_status
+        assert state.throttled is True
+
     def test_the_messages_promise_no_wait_time(self):
         """Neither surface offers one worth quoting: the storefront advertises 60 s and
         does not honour it, MCP's is ~48 minutes. A countdown we cannot stand behind is
@@ -1000,20 +1029,62 @@ class TestTheUiSaysWhenItIsBeingRateLimited:
             assert not re.search(r"\d", text), f"no countdown we cannot keep: {text!r}"
 
     def test_it_keys_on_events_that_are_actually_emitted(self):
-        """The mapping is by event NAME, so a rename in catalog.py silently strips the
-        loading message with nothing failing."""
+        """Both maps are keyed by event NAME, so a rename silently strips the loading
+        message with nothing failing. _STAGE_STATUS shipped keyed on the fixture
+        trace's vocabulary and six of nine keys never fired on a live turn, so this
+        collects emitters by AST and drops `_fixture_*` bodies — a substring scan of
+        state.py passes `variant.resolved` and `kit.assembled` on the strength of
+        `_fixture_resize` alone, which is exactly the bug."""
+        import ast
         import inspect
 
+        def live_emits(module: str) -> set[str]:
+            tree = ast.parse(inspect.getsource(_mod(module)))
+            fixture = {
+                id(node)
+                for fn in ast.walk(tree)
+                if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and fn.name.startswith("_fixture")
+                for node in ast.walk(fn)
+            }
+            return {
+                call.args[0].value
+                for call in ast.walk(tree)
+                if isinstance(call, ast.Call)
+                and getattr(call.func, "id", None) == "emit"
+                and call.args
+                and isinstance(call.args[0], ast.Constant)
+                and isinstance(call.args[0].value, str)
+                and id(call) not in fixture
+            }
+
         mod, _ = self._state()
-        emitted = "".join(
-            inspect.getsource(_mod(m))
-            for m in ("concierge.commerce.catalog", "concierge.commerce.ucp", "concierge.agent.loop")
-        )
-        for event in mod._THROTTLE_STATUS:
-            assert f'"{event}"' in emitted, (
-                f"{event!r} is in _THROTTLE_STATUS but nothing emits it — a rename left the "
-                "throttled loading message unreachable"
-            )
+        emitted: set[str] = set()
+        for m in (
+            "concierge.commerce.catalog",
+            "concierge.commerce.ucp",
+            "concierge.agent.loop",
+            "concierge.agent.classify",
+            "concierge.domain.guardrails",
+            "concierge.state",
+        ):
+            emitted |= live_emits(m)
+
+        for name, table in (("_THROTTLE_STATUS", mod._THROTTLE_STATUS), ("_STAGE_STATUS", mod._STAGE_STATUS)):
+            for event in table:
+                assert event in emitted, (
+                    f"{event!r} is in {name} but no live code path emits it — the loading "
+                    "message is unreachable outside fixture mode"
+                )
+
+    def test_the_fixture_aliases_track_the_fixture_trace(self):
+        """The fixture is what runs on stage without Gemini quota, so its own event
+        names carry the same captions — but only names it actually replays."""
+        from concierge.ui import demo_data
+
+        mod, _ = self._state()
+        replayed = {event for event, _, _ in demo_data.demo_trace()}
+        for event in mod._FIXTURE_STAGE_STATUS:
+            assert event in replayed, f"{event!r} is aliased but the fixture trace never replays it"
 
     def test_a_new_turn_and_a_clean_slate_both_start_unthrottled(self):
         import inspect
@@ -1039,6 +1110,134 @@ class TestTheUiSaysWhenItIsBeingRateLimited:
         assert normal != warned, "a rate limit should be visible, not just legible"
         assert chat.WARN in warned and chat.WARN not in normal
         assert "takes longer" in warned, "the reassurance line must actually render"
+
+
+class TestTheBudgetSurvivesOrdinaryEnglish:
+    """Over-budget is one of the four honesty affordances. It used to be switchable
+    off by accident: without a `$`, the pattern needed a currency word AFTER the
+    number, so "my budget is 900" parsed to None — and then `has_budget` is false, the
+    BUDGET stat does not render and neither budget disclosure appears."""
+
+    def _session(self, trip="", answers=()):
+        class S:
+            def __init__(self):
+                self.answers = list(answers)
+                self.trip_message = trip
+
+        return S()
+
+    def test_the_phrasings_a_person_actually_uses_parse(self):
+        from concierge.agent.loop import _budget_minor
+
+        for text in (
+            "my budget is $900",
+            "my budget is 900",
+            "keep it under 900",
+            "up to 900",
+            "900 dollars max",
+            "no more than 900 dollars",
+            "I can spend 900 dollars",
+            "presupuesto de 900 dolares",
+        ):
+            assert _budget_minor(self._session(answers=[text])) == 90_000, text
+
+    def test_a_trip_description_is_not_a_budget(self):
+        """The keyword pattern anchors on a WORD, not on money, so any number near it
+        parses — and a trip description is made of numbers that are not money. It runs
+        over `answers` only for that reason. A unit blocklist was tried first and could
+        not close this: it has to name every unit anyone might type, and "meters",
+        "litres" and "litre pack" all walked through one."""
+        from concierge.agent.loop import _budget_minor
+
+        for text in (
+            "we're hiking to around 3800 m elevation",
+            "we're hiking to around 3800 meters",
+            "climbing to about 6000 metres",
+            "camping at about 4290 m",
+            "a party of up to 4 people",
+            "a party of up to 4 hikers",
+            "up to 6 nights out",
+            "running around 21 km a week",
+            "temperatures around 2 degrees",
+            "carrying about 45 litres",
+            "about a 30 litre pack",
+            "walking around 5 miles a day",
+        ):
+            assert _budget_minor(self._session(trip=text)) is None, text
+
+    def test_a_budget_stated_in_the_opening_message_still_parses(self):
+        """Scoping the keyword pattern to `answers` must not cost the customer who
+        names a figure up front — the currency-marked patterns still read the trip."""
+        from concierge.agent.loop import _budget_minor
+
+        for text in (
+            "two nights hiking, my budget is $900",
+            "two nights hiking, 900 dollars max",
+            "two nights hiking, budget 900 usd",
+        ):
+            assert _budget_minor(self._session(trip=text)) == 90_000, text
+
+    def test_a_bare_number_is_still_not_a_budget(self):
+        """An unanchored number is a shoe size. That anchoring is the point."""
+        from concierge.agent.loop import _budget_minor
+
+        assert _budget_minor(self._session(answers=["900"])) is None
+
+
+class TestAQuotaFailureIsNotAStackTrace:
+    """An exhausted Gemini quota is the most likely failure of the demo day, and
+    `State.error` is rendered verbatim by `cart.error_block` — so no path may put a
+    class name on it."""
+
+    async def test_the_intent_gate_swallows_quota_and_fails_safe(self, monkeypatch):
+        """The gate does NOT need its own handler in run_turn: classify() catches
+        Exception itself and returns a usable verdict, so quota surfaces at the next
+        model call instead — inside the try that has a written answer."""
+        classify_mod = _mod("concierge.agent.classify")
+
+        class Quota(Exception):
+            code = 429
+
+        async def boom(**kwargs):
+            raise Quota("RESOURCE_EXHAUSTED")
+
+        monkeypatch.setattr(classify_mod, "generate", boom)
+        verdict = await classify_mod.classify("two nights hiking in the andes")
+
+        assert verdict.intent == "activity_kit", "a dead classifier must not kill the demo"
+        assert "429" not in verdict.reason and "RESOURCE_EXHAUSTED" not in verdict.reason
+
+    def test_quota_gets_its_own_words_and_they_name_the_way_out(self):
+        loop = _mod("concierge.agent.loop")
+
+        class Quota(Exception):
+            code = 429
+
+        text, stage = loop._failure(Quota("RESOURCE_EXHAUSTED"))
+
+        assert stage == "quota"
+        assert "Quota" not in text and "429" not in text and "RESOURCE_EXHAUSTED" not in text
+        assert "quota" in text.lower()
+        assert "CONCIERGE_FIXTURE_MODE" in text, "the operator's escape hatch must be named"
+
+    def test_decathlons_rate_limit_is_not_mistaken_for_model_quota(self):
+        """`_RATE_LIMITED` names carry their own wording; only the model's 429 is quota."""
+        loop = _mod("concierge.agent.loop")
+
+        class UcpRateLimited(Exception):
+            code = 429
+
+        assert loop._model_quota(UcpRateLimited("429")) is False
+
+    def test_the_raw_exception_never_becomes_the_page_error(self):
+        """State.error is rendered verbatim by cart.error_block, so a class name and an
+        exception string on it are a stack trace on a projector. Read off the file:
+        State.send_message is a Reflex EventHandler, not an inspectable function."""
+        from pathlib import Path
+
+        src = Path("concierge/state.py").read_text(encoding="utf-8")
+        assert 'self.error = f"{type(exc).__name__}: {exc}"' not in src
+        assert 'self.error = f"Cart creation failed — {type(exc).__name__}' not in src
 
 
 class TestSelectionBuildsTheKit:

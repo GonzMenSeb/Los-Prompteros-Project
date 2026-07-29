@@ -341,7 +341,7 @@ reasoning.
 |---|---|
 | `commerce/ucp.py` | this facts registry + `tests/test_contracts.py` |
 | any tool schema | `agent/tools.py`, the system prompt, and the trace event names |
-| a rate-limit trace event NAME | `state.py`'s `_THROTTLE_STATUS` — the throttled loading message is keyed by event string, so a rename silently strips it. Pinned by `test_it_keys_on_events_that_are_actually_emitted`. |
+| ANY trace event NAME a caption keys off | `state.py`'s `_THROTTLE_STATUS` **and** `_STAGE_STATUS` — both loading messages are keyed by event string, so a rename silently strips one. Pinned by `test_it_keys_on_events_that_are_actually_emitted`, which ignores `_fixture_*` bodies: `_STAGE_STATUS` shipped keyed on the fixture trace's names and six of nine never fired live. Fixture-only names belong in `_FIXTURE_STAGE_STATUS`. |
 | a guardrail | the guardrail table + its test + the trace event |
 | `rxconfig.py` | recompile the frontend; note the new URL in `docs/RUNBOOK.md` |
 | the build's state | tick it off in `docs/HANDOFF.md` — another agent resumes from there |
