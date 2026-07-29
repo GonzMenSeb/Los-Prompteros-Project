@@ -83,6 +83,62 @@ Re-measured **25 Jul 2026**, and the numbers moved. `SPEC.md §3.2` and
   an MCP lockout. They carry the catalog and stock flags, but **not variant GIDs the
   cart accepts** — `resolve_variant` needs MCP `get_product`, so a lockout degrades
   the kit to trickle speed rather than leaving it untouched.
+- **The storefront has its own limiter, and it is not MCP's.** Observed **28 Jul
+  2026**: `GET /collections.json?limit=250` returned **429 with no MCP lockout in
+  play**, and it killed the turn — `get_taxonomy` called `raise_for_status()` naked,
+  so `profile.built` was followed straight by `turn.error`.
+- **When the storefront does 429 it says `Retry-After: 60`, and that 60 is not a
+  recovery time.** Measured 28 Jul: a pooled client kept getting 429 with that same
+  header after 75 s — and after 25 minutes — of complete quiet. Never sleep it and
+  never treat it as a countdown. `catalog._get` backs off on a budget we chose
+  instead — ≤`MAX_ATTEMPTS`, `RETRY_BUDGET_SECONDS` **total** per request,
+  exponential with jitter — and a hint longer than that budget is **reported, never
+  slept**, which at 60 s means one attempt then degrade. The ladder runs only when no
+  hint is sent. **All of this is now the unhappy path, not the normal one** (see the
+  connection-reuse entry below): unpooled, we are not being limited at all.
+- **It is a rate limiter, NOT a block, and we are inside Decathlon's stated rules.**
+  The 429 body is the 18-byte `text/plain` string **`local_rate_limited`**, with
+  `Retry-After: 60` and **no `cf-mitigated` header** — no challenge, no 403, no WAF
+  page. Their own `/agents.md` explicitly lists `GET /collections/{handle}/products.json`
+  under "Read-Only Browsing (No Authentication Required)" and instructs agents to
+  *"Respect rate limits… Back off on 429 responses"*, which is exactly what
+  `catalog._get` now does. `robots.txt` is `User-agent: * / Allow: /`; its only
+  `Disallow`s are faceted-navigation patterns (`sort_by`, `filter`, `+`) that we never
+  request. **Nobody is banning us — do not go looking for a way around a block, there
+  isn't one to route around.** Note their agents.md scopes its per-IP claim to the
+  *MCP* endpoint; the storefront limiter is undocumented, which matches it not being
+  IP-keyed here.
+- **THE STOREFRONT REFUSES REUSED CONNECTIONS. This is the whole finding.**
+  Measured 28 Jul 2026, the same 24-feed burst at 6 concurrent, minutes apart from
+  one machine and one IP:
+
+  | client | connections | result |
+  |---|---|---|
+  | `urllib` | fresh per request | **24/24 OK**, 9.3 req/s |
+  | `requests`, no Session | fresh per request | **24/24 OK**, 11.4 req/s |
+  | `requests`, shared `Session` | pooled keep-alive | **4/24 OK**, 6.4 req/s |
+  | `httpx` (pools by design) | pooled | **always 429**, even idle and single-shot |
+
+  It is **faster unpooled and clean, slower pooled and refused** — so it is neither
+  a rate limit nor the HTTP library. Two consecutive full turns through
+  `requests`-with-no-Session: 24/24 feeds, 92 products, 3.2 s each, zero 429s.
+  **`catalog.client()` therefore returns the `requests` MODULE, not a Session, and
+  `_send` opens one connection per request.** The TLS handshake per request is what
+  makes the feed work at all; it costs ~2 s across a whole turn. Do not "optimise"
+  it into a Session — that does not speed the feed up, it stops it working.
+- **`ucp.py` stays on `httpx`.** The MCP endpoint is a separate limiter and is
+  unaffected — `get_product` verified working the same hour the storefront was
+  refusing every pooled request. Two clients in `commerce/` is deliberate, and
+  `trace.py` instruments both.
+- **Residual unknown:** a single `httpx.get()` from a rested state is refused too,
+  which connection *reuse* alone does not explain — that request has nothing to
+  reuse. So the mechanism is not fully nailed; what is nailed, and reproducible, is
+  the fix. A JA3/JA4 capture is still the way to close it out, and it is no longer
+  on the critical path.
+- **Earlier readings of this that are now SUPERSEDED** — do not resurrect them from
+  git history: "recovery is unmeasured", "a penalty box our own bursts earned",
+  "httpx is fingerprinted and singled out", and the storefront limiting on rate.
+  Each was consistent with the evidence available at the time and each is wrong.
 
 ### Catalog & retrieval  (`concierge/commerce/catalog.py`)
 
@@ -278,6 +334,7 @@ reasoning.
 |---|---|
 | `commerce/ucp.py` | this facts registry + `tests/test_contracts.py` |
 | any tool schema | `agent/tools.py`, the system prompt, and the trace event names |
+| a rate-limit trace event NAME | `state.py`'s `_THROTTLE_STATUS` — the throttled loading message is keyed by event string, so a rename silently strips it. Pinned by `test_it_keys_on_events_that_are_actually_emitted`. |
 | a guardrail | the guardrail table + its test + the trace event |
 | `rxconfig.py` | recompile the frontend; note the new URL in `docs/RUNBOOK.md` |
 | the build's state | tick it off in `docs/HANDOFF.md` — another agent resumes from there |

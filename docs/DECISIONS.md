@@ -279,3 +279,147 @@ Found only in a browser: Reflex returns state containers as `MutableProxy`, whic
 Handler tests asserting substrings all passed. `state.plain()` fixes it and
 `verify_ui.py` now asserts real JSON — the class of bug that only a real round trip
 exposes.
+## Backing off the storefront, and treating a rate limit as a pause — 28 Jul 2026
+
+A live turn died with `HTTPStatusError: 429` on `GET /collections.json?limit=250`. The
+trace read `profile.built` → `turn.error` → `turn.done stage=error`: `get_taxonomy()`
+called `raise_for_status()` with nothing around it, `_plan_slots` was the caller, and
+the generic handler in `run_turn` turned a rate limit into "Something broke."
+
+**The storefront's limiter is its own.** The registry's "storefront stays healthy
+through an MCP lockout" is still true and was left standing — this 429 arrived with no
+MCP lockout in play, which is a different fact.
+
+What we then measured, and it is worse than the incident suggested. The storefront sends
+`Retry-After: 60` on every 429, **and that hint is not honest**: httpx was still 429
+after 75 s of complete quiet. So the bucket is penalty-shaped rather than a rolling
+window, and neither 60 s nor MCP's 48 minutes is a recovery figure worth acting on.
+`catalog._get()` therefore backs off on a budget **we** chose — ≤4 attempts, ~12 s
+total, exponential with jitter — and never on a number Decathlon supplied. Because 60 s
+exceeds that budget, the live path is *one attempt then degrade*; the ladder only runs
+when no hint arrives. That is deliberate: 60 s inside `_tax_lock` is precisely the stall
+we refused, and a stalled turn is worse than a short kit.
+
+**Unexplained, and left unexplained on purpose.** From this machine and one IP,
+interleaved over ~45 minutes: `curl`, Python `urllib` and `requests`/`urllib3` all
+returned 200 while `httpx` returned 429 every time. The decisive reading is three
+requests inside two seconds — `06:44:34 httpx → 429`, `06:44:35 requests → 200` (228
+collections), `06:44:36 httpx → 429`. That rules out a volume bucket, a per-IP bucket
+and a time window in one shot, and `httpx` was still 429 after 25 minutes of total
+quiet. Ruled out at the application layer: User-Agent; `Accept`/`Accept-Encoding`/
+`Connection` values (curl sending httpx's exact header set got 200, httpx sending
+urllib's exact set got 429); **header order** (httpx sending requests' exact headers in
+requests' exact order still got 429); HTTP version; ALPN; address family. Whatever this
+is, it lives at TLS or below.
+
+**We did not move the storefront off httpx, and the reason is sharper than "we don't
+know why".** The tempting read is "httpx is fingerprinted, so use requests." The problem
+is that httpx is also *the only stack that has ever fired `_prefetch`'s ~24-request
+bursts from this machine* — curl, urllib and requests have only ever made single-shot
+probes here. "httpx is singled out" and "httpx is the one we burned" predict everything
+we observed, and separating them requires deliberately burning a second client, which
+spends the one known-good fallback we have. Under the second reading a swap buys one
+clean run and then re-earns the same state on the replacement, with the burst prevention
+dropped because the problem looks solved. It would also cost `logfire.instrument_httpx()`
+and split the two commerce surfaces onto different client idioms. Backoff, pacing and
+graceful degradation are the correct response under *both* readings; that is the
+tiebreaker.
+
+A stack swap therefore stands as a **demo-day contingency, untested under burst load** —
+`requests` is already in the venv and verifiably serves the feed — alongside
+`CONCIERGE_FIXTURE_MODE=1`. If it is ever taken, the pacing and backoff must travel with
+it. Probing was stopped deliberately: seven probes each eliminated a hypothesis without
+converging, and the next real step is a JA3/JA4 capture from a rested bucket, which is
+its own task.
+
+The budget is a **total**, not per-attempt, because `_tax_lock` is held across the whole
+sequence. Holding it is right — one queue against a limiter beats a thundering herd,
+and with one Granian worker every session waits on it — but that makes lock-held time
+equal to the retry budget, and the UI has no signal for a 30-second stall.
+
+**The latch decays here and does not in `ucp.py`.** Same shape, opposite lifetime, and
+the discriminator is request volume rather than confidence: `create_cart` is the only
+MCP call in a demo run, so `ucp.py`'s permanent latch costs 1.5 s, while `_prefetch`
+fires ~24 storefront requests every turn, where a permanent latch would charge every
+later turn ~36 s for one transient 429.
+
+**"Could not read" is not "not in stock."** The subtler half of the bug: `_prefetch`
+dropped a failed handle with `continue`, and `_retrieve` computed `empty = planned -
+stocked`, so a 429'd handle arrived at the model as "This collection is live but
+currently has no products in stock — say so, do not substitute." That is a fabricated
+inventory claim assembled from a request that never completed, which is the precise
+failure the guardrail principle exists to prevent. Unchecked now travels separately from
+empty through `_prefetch`, both retrieval and presentation prompts, and `_disclosures`.
+
+**A rate limit pauses the conversation instead of ending it.** `run_turn` reports
+`stage="rate_limited"`, keeps everything the turn earned on the session, and `_continue`
+re-enters at whichever stage did not finish rather than falling through to `_retrieve`
+with no slots and presenting an empty kit. The message quotes no wait time — we have no
+storefront figure worth standing behind, and MCP's is 48 minutes. On a resume turn the
+user's message is a retry, not an answer, so it is kept out of `session.answers`, where
+`_plan_slots` and `_select` would read it as a size.
+
+**The wait got its own loading state, driven off the trace.** A backoff is the one wait
+that reads as a hang: `_get` can hold a request for seconds while the spinner still says
+"Reading the conditions…", which is untrue and, on a demo, indistinguishable from a
+crash. `_drain` already walks every trace event into the UI mid-turn, so mapping the
+rate-limit events to a status there (`_THROTTLE_STATUS`) is what lets the message land
+*while the turn is still running* — a field on `TurnResult` would arrive only once the
+turn was over, which is exactly too late for a loading message. Two levels, because
+"still trying" and "gave up on that one and carried on" are different facts the user is
+entitled to, and neither quotes a number. It is warn-toned rather than merely reworded:
+the point is that a judge watching the screen can tell at a glance that we are waiting
+on Decathlon rather than broken. The coupling this creates — status keyed by event
+*name* — is pinned by a test and recorded in the maintenance contract, because a rename
+in `catalog.py` would otherwise strip the message with nothing failing.
+
+Rejected: escalating `ucp.py`'s spaced retry to 2–3 attempts while we were here. Nothing
+in the incident implicated MCP; 1.5 s is measured and 3 s / 6 s would have been invented;
+and `UcpRateLimited`'s documented meaning — "even a trickle was refused" — is depended on
+by `tools.py` and pinned by a test. Its mitigation is already the measured-correct one.
+
+## Correction: the storefront refuses reused connections — 28 Jul 2026
+
+The entry above concluded "do not swap the storefront off httpx" and left the cause
+open between a TLS-fingerprint bucket and a penalty box our own bursts earned. A
+deliberate experiment settled it, and then a second one overturned the conclusion we
+drew from the first. Both are recorded because the sequence is the point.
+
+**Experiment 1 — burn an expendable client.** The two hypotheses were indistinguishable
+by any test that did not involve bursting a second client, so we bursted the one we
+would never ship: stdlib `urllib`, 24 collection feeds at 6 concurrent, one turn's
+worth. It returned **24/24 at 9.3 req/s**, and immediately afterwards `requests`
+returned 200 while `httpx` returned 429 in the same second. The penalty-box hypothesis
+died there: a client that had just bursted was fine, a client idle for hours was
+refused. On that evidence the swap was approved and made.
+
+**Experiment 2 — the swap failed, which was the useful part.** `requests` behind a
+thread-local `Session` gave **17 of 24 feeds 429** on the first real turn. Adding rate
+spacing made it *worse* (4/24 at 6.4 req/s), while `urllib` re-ran clean at 9.3 req/s
+minutes later. Rate was therefore exonerated. The one remaining difference was
+connection reuse — `urllib` pools nothing, `Session` and `httpx` both do — and
+`requests` with **no** Session returned **24/24 at 11.4 req/s**. Faster unpooled and
+clean, slower pooled and refused. It is not rate and it is not the library.
+
+So `catalog.client()` returns the `requests` **module**, never a Session, and the TLS
+handshake per request is the price of the feed working at all — about 2 s across a
+whole turn, against two consecutive verification turns of 24/24 feeds and 92 products
+in 3.2 s each with zero 429s. `ucp.py` stays on `httpx`: the MCP endpoint is a separate
+limiter, verified working the same hour, and `create_cart` is the demo's proof.
+
+**What we got wrong, in order:** "recovery is unmeasured" (it was measurable), "a
+penalty box our own bursts earned" (disproved by experiment 1), "httpx is fingerprinted
+and singled out" (too narrow — every pooled client is refused), and "the storefront
+limits on rate" (disproved by 11.4 req/s clean). Each was the honest reading of the
+evidence then available. The registry carries only the surviving version, and lists the
+superseded ones by name so they are not rediscovered from git history.
+
+**Still open:** a single `httpx.get()` from rest is refused too, and that request has no
+connection to reuse. So reuse cannot be the whole mechanism. A JA3/JA4 capture would
+close it out; it is no longer on the critical path, because the fix is measured,
+reproducible, and does not depend on knowing why.
+
+Rejected again, and now on better grounds: `curl_cffi` or any browser-impersonation
+transport. Decathlon's `agents.md` explicitly permits the endpoints we read and asks
+only that we back off on 429 — which we do. The fix that worked is "open a fresh
+connection", not "look like a browser", and that distinction is worth keeping.
