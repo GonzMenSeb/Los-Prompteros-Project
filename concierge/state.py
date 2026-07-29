@@ -150,21 +150,17 @@ class KitCard(BaseModel):
     # A guessed size looked identical to a chosen one on the card, so the only
     # trace of it was a sentence in the chat log that scrolls away.
     size_confirmed: bool
-    # Non-empty on the FIRST card of each person's block, which the grid renders as a
-    # full-width row. The heading rides on the card rather than nesting the cards under
-    # a group model because Reflex cannot type a list field reached through a foreach
-    # loop variable — `rx.foreach(group.items, …)` compiles to a blank page.
+    # Non-empty on the FIRST card of each person's block. The grid renders it as a
+    # full-width row, which is why it rides on the card: `grid-column: 1 / -1` needs the
+    # heading to be a direct child of the same grid as the cards, so every block shares
+    # one set of column widths. Nesting cards under a group model is possible in Reflex
+    # 0.9.7 — but do NOT name that model's list field `items`: `ObjectVar.items` shadows
+    # it and `rx.foreach(group.items, …)` dies with "Unsupported type <class 'method'>".
     person_heading: str = ""
     rationale: str
 
 
-def _person_order(label: str) -> tuple[int, str]:
-    """Plain string sort puts "Person 10" between "Person 1" and "Person 2"."""
-    _, _, tail = label.rpartition(" ")
-    return (int(tail), "") if tail.isdigit() else (1 << 30, label)
-
-
-def to_card(item: KitItem) -> KitCard:
+def to_card(item: KitItem, heading: str = "") -> KitCard:
     return KitCard(
         slot_label=item.slot.replace("_", " ").upper(),
         product_title=item.product_title,
@@ -180,6 +176,7 @@ def to_card(item: KitItem) -> KitCard:
         price_display=minor_to_display(item.price_minor),
         size_substituted=item.size_substituted,
         size_confirmed=item.size_confirmed,
+        person_heading=heading,
         rationale=item.rationale,
     )
 
@@ -302,19 +299,21 @@ class State(rx.State):
         first card. A line covering two people — one variant, quantity 2 — is shared
         rather than person 1's: under a per-person heading it would read as theirs
         alone, and listing it under both would show one cart line twice."""
-        named: dict[str, list[KitItem]] = {}
+        owned: dict[int, list[KitItem]] = {}
         shared: list[KitItem] = []
         for item in self.kit_items:
-            labels = list(item.person_labels)
-            (named.setdefault(labels[0], []) if len(labels) == 1 else shared).append(item)
-        blocks = [(name, named[name]) for name in sorted(named, key=_person_order)]
+            if len(item.person_indexes) == 1:
+                owned.setdefault(item.person_indexes[0], []).append(item)
+            else:
+                shared.append(item)
+        blocks = [(f"Person {n}", items) for n, items in sorted(owned.items())]
         if shared:
-            # No named blocks means a party of one: nobody to tell apart, so the whole
-            # kit is one unheaded run rather than everything filed under "Shared".
-            blocks.append(("Shared" if named else "", shared))
+            # Nobody named means nobody to tell apart — a party of one, or a party whose
+            # every line is shared — so the kit is one unheaded run instead.
+            blocks.append(("Shared" if owned else "", shared))
         return [
-            to_card(item).model_copy(update={"person_heading": label if n == 0 else ""})
-            for label, items in blocks
+            to_card(item, heading if n == 0 else "")
+            for heading, items in blocks
             for n, item in enumerate(items)
         ]
 
@@ -377,10 +376,15 @@ class State(rx.State):
         return self.unconfirmed_count > 0
 
     @rx.var
-    def unconfirmed_note(self) -> str:
+    def unconfirmed_subject(self) -> str:
+        """Both the kit-summary prompt and the confirm-bar caption open on this count,
+        so the plural rule has one place to be wrong in rather than two."""
         n = self.unconfirmed_count
-        item = "item is" if n == 1 else "items are"
-        return f"{n} {item} in a generic size because none was specified."
+        return f"{n} item is" if n == 1 else f"{n} items are"
+
+    @rx.var
+    def unconfirmed_note(self) -> str:
+        return f"{self.unconfirmed_subject} in a generic size because none was specified."
 
     @rx.var
     def walkthrough_active(self) -> bool:

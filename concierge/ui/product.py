@@ -66,8 +66,8 @@ from concierge.ui.theme import (  # noqa: F401
 )
 
 
-def _eyebrow(label, color: str = MUTED) -> rx.Component:
-    return rx.text(label, size="1", weight="bold", color=color, letter_spacing=TRACK_EYEBROW)
+def _eyebrow(label, color: str = MUTED, **props) -> rx.Component:
+    return rx.text(label, size="1", weight="bold", color=color, letter_spacing=TRACK_EYEBROW, **props)
 
 
 def _chip(icon: str, label, fg: str = TEXT, bg: str = TINT_1, border: str = TINT_2) -> rx.Component:
@@ -356,11 +356,8 @@ def size_prompt() -> rx.Component:
         rx.hstack(
             rx.icon("ruler", size=16, color=BRAND, flex_shrink="0"),
             rx.text(
-                rx.cond(
-                    State.unconfirmed_count > 1,
-                    f"{State.unconfirmed_count} items are in a size I picked for you. ",
-                    "One item is in a size I picked for you. ",
-                ),
+                State.unconfirmed_subject,
+                " in a size I picked for you. "
                 "Tell me your size and I'll swap it — the cart can still change.",
                 size="2",
                 color=TEXT,
@@ -429,7 +426,7 @@ def kit_summary() -> rx.Component:
     )
 
 
-def _carded(card: KitCard) -> rx.Component:
+def _card_with_heading(card: KitCard) -> rx.Component:
     """`rx.fragment` leaves no DOM node, so the heading and the card both land as direct
     children of the grid — the heading spanning every column, which starts the next
     person on a fresh row."""
@@ -438,17 +435,9 @@ def _carded(card: KitCard) -> rx.Component:
             card.person_heading != "",
             rx.hstack(
                 rx.icon("user", size=14, color=GREY_3, flex_shrink="0"),
-                rx.text(
-                    card.person_heading,
-                    size="1",
-                    weight="bold",
-                    color=MUTED,
-                    letter_spacing=TRACK_EYEBROW,
-                    # The separator's flex_grow will otherwise take the row and wrap a
-                    # two-word label onto two lines.
-                    white_space="nowrap",
-                    flex_shrink="0",
-                ),
+                # nowrap because the separator's flex_grow otherwise takes the row and
+                # breaks a two-word label over two lines.
+                _eyebrow(card.person_heading, white_space="nowrap", flex_shrink="0"),
                 rx.separator(flex_grow="1"),
                 spacing="2",
                 align="center",
@@ -468,7 +457,7 @@ def kit_grid() -> rx.Component:
             kit_summary(),
             unservable_notice(),
             rx.grid(
-                rx.foreach(State.cards, _carded),
+                rx.foreach(State.cards, _card_with_heading),
                 # `lg` is the same breakpoint at which the 384px audit rail moves
                 # beside this column, so three cards here were being asked to share
                 # what was left of a 1024px viewport — roughly 200px each, with the

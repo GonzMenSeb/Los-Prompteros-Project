@@ -499,11 +499,15 @@ It does **not** gate the cart button. That is the entry above, unchanged: seeing
 products is what makes the size question answerable, and the cart stays editable. This
 adds the route to answering, not a blocker on the way.
 
-**`KitItem.person_labels` is a list, not a string.** `_merge_variants` folds two people
-onto one cart line when they take the same variant — it exists because `create_cart`
-merges identical variants into one line, and `len(kit.items)` has to keep agreeing with
-`line_count`. A single label would have had to be dropped at that merge, and the card
-would then have read as person 1's alone. Empty means shared kit or a party of one.
+**`KitItem.person_indexes` is a list of ordinals, not a name.** `_merge_variants` folds
+two people onto one cart line when they take the same variant — it exists because
+`create_cart` merges identical variants into one line, and `len(kit.items)` has to keep
+agreeing with `line_count`. A scalar would have had to be dropped at that merge, and the
+card would then have read as person 1's alone. Ordinals rather than rendered `"Person N"`
+strings so the wording lives in one UI formatter instead of being minted in the agent
+loop and again in the fixture — and so ordering is numeric: sorted as strings,
+`Person 10` lands between `Person 1` and `Person 2`. Empty means shared kit or a party
+of one.
 
 **The person counter runs per slot, not per pick.** A party of two splits across two
 picks for one slot — a women's boot and a men's one — not across two sizes inside one
@@ -516,9 +520,18 @@ if the model is ever seen shuffling picks within a slot.
 
 Recorded because it will look like a bug to anyone reading the diff: the kit grid is one
 flat `rx.grid` whose person headings are cards carrying a `person_heading`, spanning
-every column via `grid-column: 1 / -1`. The obvious shape — a list of group models each
-holding its cards, nested `rx.foreach` — compiles to a blank page. Reflex cannot type a
-list field reached through a foreach loop variable, and it fails at component
-construction with "Cannot pass a Var to a built-in function". Every state-level
-assertion passed while the page was dead, so `test_the_kit_grid_still_builds` now
-constructs the components the suite had only ever exercised through their state vars.
+every column via `grid-column: 1 / -1`. That is what keeps every block on one shared set
+of column widths — a grid per group would let the columns drift between people.
+
+**And a trap worth the paragraph, because the first attempt here recorded the wrong
+cause.** The obvious shape — a group model holding `items: list[KitCard]`, nested
+`rx.foreach` — dies at component construction with `TypeError: Unsupported type
+<class 'method'>`. It is tempting to conclude Reflex cannot type a list reached through
+a foreach loop variable. It can. **`ObjectVar` defines its own `items`** (an alias of
+`entries`), so `group.items` hands back a bound method instead of the field. Rename the
+field to `cards` and the identical nested shape renders fine on 0.9.7. Anyone who
+believes the first diagnosis will flatten a model that never needed flattening.
+
+That failure shipped green: every state-level assertion passed while the page was dead,
+and the app has one route, so nothing rendered at all. `make check` never built a
+component. `test_the_kit_grid_still_builds` now does.

@@ -102,9 +102,7 @@ def confirm_bar() -> rx.Component:
                 spacing="2",
                 align="center",
             ),
-            # Deliberately does NOT gate the cart button (DECISIONS, 29 Jul): seeing the
-            # products is what makes the size question answerable, and the cart stays
-            # editable. This is the route to answering it, not a blocker on the way.
+            # Not a gate on the cart button — DECISIONS, 29 Jul.
             rx.cond(
                 State.has_unconfirmed,
                 rx.vstack(
