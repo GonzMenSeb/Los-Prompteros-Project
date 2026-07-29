@@ -50,6 +50,7 @@ from concierge.ui.theme import (  # noqa: F401
     TINT_1,
     TINT_2,
     TINT_3,
+    TRACK_DISPLAY,
     TRACK_EYEBROW,
     TRACK_TIGHT,
     TRACK_TIGHTER,
@@ -80,14 +81,10 @@ EXAMPLES: tuple[tuple[str, str, str], ...] = (
 )
 
 
-def eyebrow(label: str, color: str = MUTED) -> rx.Component:
-    return rx.text(
-        label,
-        size="1",
-        weight="bold",
-        color=color,
-        letter_spacing=TRACK_EYEBROW,
-    )
+def _attribution(label: str, color: str = MUTED) -> rx.Component:
+    """Who is speaking. Not an eyebrow — sentence case, no tracking: a transcript
+    needs attribution, but two ALL-CAPS labels per exchange is just noise."""
+    return rx.text(label, size="1", weight="bold", color=color)
 
 
 def citation_link(c) -> rx.Component:
@@ -114,7 +111,9 @@ def citations(m) -> rx.Component:
     return rx.cond(
         m.citations.length() > 0,
         rx.vstack(
-            eyebrow("SOURCES · GROUNDED WEB SEARCH"),
+            # The provenance claim is real and stays, but it is a caption on the
+            # chips below it, not a heading over a section.
+            rx.text("Grounded on live web search", size="1", color=MUTED),
             rx.flex(
                 rx.foreach(m.citations, citation_link),
                 wrap="wrap",
@@ -133,7 +132,7 @@ def citations(m) -> rx.Component:
 def _user_bubble(m: ChatMessage) -> rx.Component:
     return rx.box(
         rx.vstack(
-            eyebrow("YOU", MUTED),
+            _attribution("You"),
             rx.text(m.content, size="3", color=TEXT, white_space="pre-wrap", line_height="1.65"),
             spacing="2",
             align="start",
@@ -144,7 +143,6 @@ def _user_bubble(m: ChatMessage) -> rx.Component:
         border_radius=RADIUS,
         background=TINT_1,
         border=f"1px solid {TINT_2}",
-        class_name="db-rise",
     )
 
 
@@ -153,7 +151,7 @@ def _bot_bubble(m: ChatMessage) -> rx.Component:
         rx.vstack(
             rx.hstack(
                 brand.mark(size="1.3rem", glyph=13, dot=False),
-                eyebrow("DECABOT", BRAND),
+                _attribution("DecaBot", BRAND),
                 spacing="2",
                 align="center",
             ),
@@ -187,11 +185,12 @@ def _bot_bubble(m: ChatMessage) -> rx.Component:
         width="100%",
         padding="1.1rem 1.25rem",
         border_radius=RADIUS,
+        # DecaBot speaks from a raised white panel, the user from a flat tint. The
+        # two roles are told apart by elevation now — the blue stripe down the edge
+        # was the same device the errors, the budget and the cart were all using.
         background=PANEL,
         border=f"1px solid {BORDER}",
-        border_left=f"3px solid {ACCENT}",
         box_shadow=SHADOW_SM,
-        class_name="db-rise",
     )
 
 
@@ -293,18 +292,49 @@ def composer() -> rx.Component:
     )
 
 
-def _example(icon: str, label: str, prompt: str) -> rx.Component:
+def _primary_example(icon: str, label: str, prompt: str) -> rx.Component:
     # rx.button rather than a clickable box: Enter and Space have to work.
     return rx.button(
         rx.hstack(
-            rx.icon(icon, size=16, color=BRAND, flex_shrink="0"),
+            rx.icon(icon, size=26, color=ON_BRAND, flex_shrink="0"),
             rx.vstack(
-                rx.text(label, size="2", weight="bold", color=TEXT, line_height="1.3"),
-                rx.text(prompt, size="1", color=MUTED, line_height="1.45", no_of_lines=2),
+                rx.text(label, size="5", weight="bold", color=ON_BRAND, line_height="1.25"),
+                # TINT_3 on BRAND is 5.6:1. Secondary type on a coloured surface is
+                # tinted from that surface, never greyed.
+                rx.text(prompt, size="2", color=TINT_3, line_height="1.5"),
                 spacing="1",
                 align="start",
             ),
-            spacing="3",
+            rx.spacer(),
+            rx.icon("arrow-right", size=20, color=ON_BRAND, flex_shrink="0"),
+            spacing="4",
+            align="center",
+            width="100%",
+        ),
+        on_click=State.send_example(prompt),
+        disabled=State.is_thinking,
+        cursor="pointer",
+        width="100%",
+        height="auto",
+        justify_content="flex-start",
+        padding="1.15rem 1.3rem",
+        text_align="left",
+        background=f"linear-gradient(140deg, {BRAND} 0%, {BRAND_DEEP} 100%)",
+        border_radius=RADIUS_LG,
+        box_shadow=SHADOW_BRAND,
+        transition=f"transform 200ms {EASE}, box-shadow 200ms {EASE}",
+        _hover={"box_shadow": SHADOW_LG, "transform": "translateY(-3px)"},
+        _active={"transform": "translateY(0)"},
+    )
+
+
+def _example(icon: str, label: str, prompt: str) -> rx.Component:
+    return rx.button(
+        rx.vstack(
+            rx.icon(icon, size=17, color=BRAND, flex_shrink="0"),
+            rx.text(label, size="2", weight="bold", color=TEXT, line_height="1.3"),
+            rx.text(prompt, size="1", color=MUTED, line_height="1.45", no_of_lines=2),
+            spacing="2",
             align="start",
             width="100%",
         ),
@@ -337,10 +367,12 @@ def empty_state() -> rx.Component:
                     # first message lands, so as an h1 it took the page's only
                     # top-level heading with it. app.py owns the persistent h1.
                     as_="h2",
-                    size="7",
                     color=TEXT,
-                    letter_spacing=TRACK_TIGHTER,
-                    text_align="center",
+                    font_size=["2.5rem", "3rem", "4.25rem"],
+                    font_weight="800",
+                    line_height="0.98",
+                    letter_spacing=TRACK_DISPLAY,
+                    class_name="db-balance",
                 ),
                 rx.text(
                     "Where you are going, who is going, and how long for. DecaBot researches "
@@ -349,28 +381,30 @@ def empty_state() -> rx.Component:
                     "when it is not.",
                     size="3",
                     color=MUTED,
-                    text_align="center",
-                    max_width="52ch",
+                    max_width="68ch",
                     line_height="1.7",
                 ),
-                spacing="3",
-                align="center",
+                spacing="4",
+                align="start",
+                width="100%",
             ),
+            # One primary path and two alternates. Three equal cards made the choice
+            # look like a menu with no recommendation; the páramo trip is the one
+            # that exercises every honesty affordance, so it leads.
             rx.vstack(
-                eyebrow("OR START FROM ONE OF THESE"),
+                _primary_example(*EXAMPLES[0]),
                 rx.grid(
-                    *[_example(*e) for e in EXAMPLES],
-                    columns=rx.breakpoints(initial="1", md="3"),
+                    *[_example(*e) for e in EXAMPLES[1:]],
+                    columns=rx.breakpoints(initial="1", sm="2"),
                     gap="0.7rem",
                     width="100%",
                 ),
                 spacing="3",
-                align="center",
+                align="start",
                 width="100%",
-                padding_top="0.5rem",
             ),
-            spacing="5",
-            align="center",
+            spacing="6",
+            align="start",
             width="100%",
             padding=["1.5rem 0", "1.5rem 0", "2.5rem 0 1rem"],
         ),

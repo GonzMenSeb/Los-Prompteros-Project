@@ -245,10 +245,12 @@ def cart_block() -> rx.Component:
             width="100%",
             padding="1.25rem",
             background=WHITE,
-            border=f"1px solid {BORDER}",
-            border_left=f"3px solid {SUCCESS}",
+            # The cart landing is the end of the flow, so it is lifted off the page
+            # rather than striped down one edge like every other callout was.
+            border=f"1px solid {SUCCESS_BG}",
+            border_top=f"3px solid {SUCCESS}",
             border_radius=RADIUS_LG,
-            box_shadow=SHADOW_MD,
+            box_shadow=SHADOW_LG,
         ),
     )
 
@@ -257,15 +259,21 @@ def error_block() -> rx.Component:
     return rx.cond(
         State.error != "",
         rx.hstack(
-            rx.icon("circle-alert", size=17, color=DANGER, flex_shrink="0"),
+            rx.center(
+                rx.icon("circle-alert", size=15, color=WHITE),
+                width="1.85rem",
+                height="1.85rem",
+                flex_shrink="0",
+                background=DANGER,
+                border_radius=RADIUS_SM,
+            ),
             rx.text(State.error, size="2", color=TEXT, line_height="1.6"),
-            spacing="2",
+            spacing="3",
             align="center",
             width="100%",
             padding="0.85rem 1rem",
             background=DANGER_BG,
-            border=f"1px solid rgba(215,3,34,0.25)",
-            border_left=f"3px solid {DANGER}",
+            border="1px solid rgba(215,3,34,0.25)",
             border_radius=RADIUS,
         ),
     )
@@ -290,6 +298,6 @@ def fixture_ribbon() -> rx.Component:
         width="100%",
         padding="0.55rem 0.8rem",
         background=WARN_BG,
-        border_left=f"3px solid {WARN}",
-        border_radius=f"0 {RADIUS_SM} {RADIUS_SM} 0",
+        border=f"1px solid {WARN}",
+        border_radius=RADIUS_SM,
     )
