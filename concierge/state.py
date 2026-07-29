@@ -158,6 +158,12 @@ class KitCard(BaseModel):
     rationale: str
 
 
+def _person_order(label: str) -> tuple[int, str]:
+    """Plain string sort puts "Person 10" between "Person 1" and "Person 2"."""
+    _, _, tail = label.rpartition(" ")
+    return (int(tail), "") if tail.isdigit() else (1 << 30, label)
+
+
 def to_card(item: KitItem) -> KitCard:
     return KitCard(
         slot_label=item.slot.replace("_", " ").upper(),
@@ -301,7 +307,7 @@ class State(rx.State):
         for item in self.kit_items:
             labels = list(item.person_labels)
             (named.setdefault(labels[0], []) if len(labels) == 1 else shared).append(item)
-        blocks = [(name, named[name]) for name in sorted(named)]
+        blocks = [(name, named[name]) for name in sorted(named, key=_person_order)]
         if shared:
             # No named blocks means a party of one: nobody to tell apart, so the whole
             # kit is one unheaded run rather than everything filed under "Shared".

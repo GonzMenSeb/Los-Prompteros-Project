@@ -1494,6 +1494,20 @@ class TestTheKitSaysWhoEachLineIsFor:
             "a party of one has nobody to tell apart — not even a 'Shared' heading"
         )
 
+    def test_a_big_party_is_not_ordered_alphabetically(self):
+        """Reachable: `requests` caps at 6 per pick, but a slot takes several picks, so
+        a large party really does produce Person 10. Sorted as strings it lands between
+        Person 1 and Person 2."""
+        state_mod = _mod("concierge.state")
+        state = state_mod.State(_reflex_internal_init=True)
+        state.kit_items = [
+            item(slot=f"s{n}", person_labels=[f"Person {n}"]) for n in (1, 10, 2, 11, 3)
+        ]
+
+        assert [c.person_heading for c in state.cards] == [
+            "Person 1", "Person 2", "Person 3", "Person 10", "Person 11",
+        ]
+
     def test_the_kit_grid_still_builds(self):
         """This is the test that was missing. `kit_groups` was a list of models each
         holding a list of cards, and the state var for it passed every assertion in
