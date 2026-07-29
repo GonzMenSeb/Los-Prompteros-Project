@@ -508,29 +508,26 @@ async def _retrieve(session: ConversationSession, message: str) -> str:
 
 _NUM = r"(\d[\d,]*(?:\.\d{1,2})?)"
 _CURRENCY = r"(?:usd|dollars?|bucks|d[oó]lares)"
-# A trip description is full of numbers that are not money, and `trip_message` is part
-# of the text searched. Without this, the demo's own "around 3800 m" read as a $3800
-# budget. Only the loosely-anchored keyword pattern needs it — the other three are
-# anchored on a currency marker already.
-# The first lookahead is load-bearing: without it the engine simply backtracks the
-# number to dodge the unit test — "3800 m" gives up its last digit and matches as
-# "380", which is a $380 budget instead of no budget at all.
-_NOT_A_UNIT = (
-    r"(?![\d.,])"
-    r"(?!\s*(?:m\b|km|mi\b|ft\b|kg|lb|°|deg|celsius|people|persons?|pax|"
-    r"nights?|days?|hours?|hrs?|weeks?|months?|years?|yrs?))"
+# Carry a currency marker, so they are safe to run over the trip description too.
+_ANCHORED_PATTERNS = tuple(
+    re.compile(p, re.I)
+    for p in (
+        rf"\$\s*{_NUM}",
+        rf"{_NUM}\s*{_CURRENCY}",
+        rf"{_NUM}\s*(?:max|maximum|or less|tops)\b",
+    )
 )
-# Anchored three ways, because an unanchored number grabs the first digits in the
-# message and those are a shoe size. Measured misses this widening fixes, all of which
-# used to parse to None and take the whole over-budget disclosure down with them:
-# "my budget is 900", "keep it under 900", "up to 900", "900 dollars max",
-# "no more than 900 dollars", "presupuesto 900 dolares".
-_BUDGET_PATTERNS = (
-    rf"\$\s*{_NUM}",
-    rf"(?:budget|spend|under|up to|max(?:imum)?|no more than|around|about|presupuesto|hasta)"
-    rf"\D{{0,15}}?{_NUM}{_NOT_A_UNIT}",
-    rf"{_NUM}\s*{_CURRENCY}",
-    rf"{_NUM}\s*(?:max|maximum|or less|tops)\b",
+# This one anchors on a word, not on money, so any number near it parses — and a trip
+# description is made of numbers that are not money. It runs over `answers` ONLY.
+# Over the trip description it read "around 3800 meters" as a $3800 budget, which is
+# worse than reading nothing: the kit then discloses an overrun against a figure the
+# customer never gave. A unit blocklist was tried and cannot close this — it has to
+# list every unit anyone might type, and "meters", "litres" and "litre pack" all got
+# through one.
+_KEYWORD_PATTERN = re.compile(
+    r"(?:budget|spend|under|up to|max(?:imum)?|no more than|around|about|presupuesto|hasta)"
+    rf"\D{{0,15}}?{_NUM}(?![\d.,])",
+    re.I,
 )
 # Only fires when the customer clearly meant money and we still could not anchor it.
 _MONEY_HINT = re.compile(rf"\$|{_CURRENCY}|budget|presupuesto", re.I)
@@ -539,8 +536,9 @@ _MONEY_HINT = re.compile(rf"\$|{_CURRENCY}|budget|presupuesto", re.I)
 def _budget_minor(session: ConversationSession) -> int | None:
     """Anchored on the currency marker or a budget word. An unanchored number
     grabs the first digits in the message, which is a shoe size."""
-    text = " ".join(session.answers) + " " + session.trip_message
-    m = next((mm for p in _BUDGET_PATTERNS if (mm := re.search(p, text, re.I))), None)
+    answers = " ".join(session.answers)
+    text = answers + " " + session.trip_message
+    m = next((mm for p in _ANCHORED_PATTERNS if (mm := p.search(text))), None) or _KEYWORD_PATTERN.search(answers)
     if not m:
         # Silence here used to remove the BUDGET stat and both budget disclosures
         # from the page with nothing said anywhere the customer would look.
@@ -780,18 +778,10 @@ async def run_turn(user_message: str, session: ConversationSession) -> TurnResul
     tools.bind_cache(session.catalog)
     session.turns.append({"role": "user", "text": user_message})
     session.model_calls += 1  # classify() does not route through _model()
-    # The intent gate is the FIRST Gemini call of every turn and used to sit outside
-    # the try below, so it was the one call whose failure had no written answer — it
-    # propagated to State.error and got rendered raw. Quota dies here first.
-    try:
-        verdict = await classify(user_message, session.transcript())
-    except Exception as exc:
-        result = TurnResult()
-        result.text, result.stage = _failure(exc)
-        result.error = f"{type(exc).__name__}: {exc}"[:300]
-        session.turns.append({"role": "assistant", "text": result.text})
-        emit("turn.done", {"intent": result.intent, "stage": result.stage, "model_calls": session.model_calls})
-        return result
+    # Unguarded on purpose: classify() catches Exception itself and returns a fail-safe
+    # verdict, so quota does not escape it — it surfaces on the next model call, inside
+    # the try below. A second handler here only looked like it covered the gate.
+    verdict = await classify(user_message, session.transcript())
 
     result = TurnResult(intent=verdict.intent)
     try:

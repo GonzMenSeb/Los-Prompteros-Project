@@ -46,11 +46,14 @@ quota as *the* bottleneck. This is the single most likely failure of the day, an
 is the worst-presented one. The Decathlon path proves the team already knows how to
 handle a rate limit well — Gemini just was not added to the same list.
 
-**Fixed.** The review understated this: `classify()` — the first Gemini call of every
-turn — sat *outside* `run_turn`'s try block, so it was the one call whose failure had
-no written answer at all. It is now guarded, quota is recognised as its own failure
-with its own message naming the fixture escape hatch, and `State.error` no longer
-carries a class name in any path.
+**Fixed.** Quota is now recognised as its own failure, with its own message naming the
+fixture escape hatch, and `State.error` no longer carries a class name on any path.
+
+One correction to the first attempt, which claimed quota died at the intent gate and
+wrapped `classify()` in a second handler: it does not. `classify()` catches `Exception`
+itself and returns a fail-safe verdict, so quota never escapes it — it surfaces on the
+next model call, inside the try that already had a written answer. The extra handler
+could only fire if `classify` were replaced, which is what its test did. Removed.
 
 ### 2. The status line freezes for the whole longest wait — FIXED
 
@@ -71,8 +74,17 @@ their very first interaction.
 The audit rail *is* updating live — but a person who has never seen this product is
 not reading a log to find out whether it is alive.
 
-**Fixed.** Derived from the trace already being drained mid-turn. Observed live: 8
-distinct captions across one turn. A throttle message still outranks them.
+**Fixed.** Derived from the trace already being drained mid-turn. A throttle message
+still outranks the routine captions.
+
+The first attempt did not work outside fixture mode: the table was keyed on
+`ui/demo_data.py`'s event vocabulary, so six of its nine keys had no live emitter and
+the caption still froze through retrieval and sizing — the longest stretch of the turn,
+and the whole point. It is now keyed on what the live pipeline emits (`gate.verdict`,
+`research.grounded`, `catalog.collection`, `ucp.call`, `catalog.variant_resolved`,
+`kit.built`), with the fixture names kept as explicit aliases so the on-stage replay
+still moves. `test_it_keys_on_events_that_are_actually_emitted` now covers both tables
+and ignores `_fixture_*` bodies, which is what let two of the dead keys look alive.
 
 ### 3. The budget silently vanishes on the most natural phrasing — FIXED
 
@@ -106,11 +118,23 @@ four honesty affordances the product is judged on**, and this is a way to switch
 off by accident, by typing English.
 
 **Fixed**, with a trap worth recording. Widening the anchors made the *opposite*
-failure real, because `trip_message` is part of the searched text: "around 3800 m"
-parsed as a $3800 budget. Two lookaheads stop it — one for units, and one anchoring
-the end of the number, without which the regex simply backtracks to "380" to dodge
-the unit test. Both directions are pinned by tests. A bare number is still not a
-budget, and an unanchorable money mention now emits a guardrail instead of nothing.
+failure real, and that direction is worse: a miss is silent, but a false positive
+makes the kit disclose an overrun against a figure the customer never gave.
+
+The first attempt fought it with a unit blocklist inside the regex — `m|km|mi|ft|kg|
+lb|people|nights|…`. That cannot close the hole, because it has to name every unit
+anyone might type: `around 3800 meters` still parsed as **$3800**, `about 45 litres`
+as **$45**, `about 30 litre pack` as **$30**. Small ones only escaped notice because
+the pre-existing under-$20 floor swallowed them.
+
+The scope was the actual bug. Only the keyword pattern is loose enough to be fooled,
+and it only needed the trip description because it was reading it — so it now runs
+over `session.answers` alone, while the three currency-marked patterns still read the
+trip. No blocklist. Both directions are pinned, including the units that defeated the
+list. One honest regression: a bare `budget around 900` in the *opening* message now
+returns `None`; the same figure parses with a `$` or the word `dollars`, or said as an
+answer. A bare number is still not a budget, and an unanchorable money mention emits a
+guardrail instead of nothing.
 
 ---
 
