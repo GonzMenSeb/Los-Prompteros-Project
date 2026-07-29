@@ -43,6 +43,7 @@ from concierge.ui.theme import (  # noqa: F401
     SHADOW_XS,
     SUCCESS,
     SUCCESS_BG,
+    SUCCESS_DEEP,
     TEXT,
     TINT_1,
     TINT_2,
@@ -52,6 +53,7 @@ from concierge.ui.theme import (  # noqa: F401
     TRACK_TIGHTER,
     WARN,
     WARN_BG,
+    WARN_INK,
     WHITE,
 )
 
@@ -96,6 +98,8 @@ def header() -> rx.Component:
             rx.icon("rotate-ccw", size=15),
             rx.text("Start over", size="2", weight="medium", display=["none", "none", "block"]),
             on_click=State.clear,
+            # Same trap as the composer's Send: the label is hidden below md.
+            aria_label="Start over",
             variant="outline",
             size="2",
             cursor="pointer",
@@ -104,6 +108,7 @@ def header() -> rx.Component:
             padding_x="0.9rem",
             _hover={"background": TINT_2},
         ),
+        role="banner",
         width="100%",
         align="center",
         spacing="3",
@@ -126,21 +131,50 @@ def main_column() -> rx.Component:
         product.kit_grid(),
         cart.confirm_bar(),
         cart.cart_block(),
-        chat.composer(),
+        # The composer sticks to the bottom of the viewport instead of sitting at
+        # the end of the column. With a kit on screen the column runs several
+        # thousand pixels; the reply to "what size are you?" was below all of it.
+        rx.box(
+            chat.composer(),
+            position="sticky",
+            bottom="0",
+            z_index="10",
+            width="100%",
+            padding_top="0.9rem",
+            padding_bottom="0.6rem",
+            background=f"linear-gradient(180deg, rgba(245,246,252,0) 0%, {BG} 42%)",
+        ),
         spacing="5",
         width="100%",
         max_width=CONTENT_W,
-        padding=["1rem", "1rem", "1.6rem 1.4rem 2.4rem"],
+        padding=["1rem", "1rem", "1.6rem 1.4rem 1.4rem"],
         align="start",
+    )
+
+
+def skip_link() -> rx.Component:
+    """First tab stop on the page. Without it a keyboard user walks the whole
+    header and, once a kit is up, every card link before reaching the composer."""
+    return rx.link(
+        "Skip to the conversation",
+        href="#decabot-main",
+        class_name="db-skip",
     )
 
 
 def index() -> rx.Component:
     return rx.box(
+        skip_link(),
+        # The only h1 on the page. The empty state's heading used to be it, and it
+        # unmounts as soon as the conversation starts — leaving a document with no
+        # top-level heading for the rest of the session.
+        rx.heading("DecaBot — Decathlon expedition concierge", as_="h1", class_name="db-sr-only"),
         header(),
         rx.flex(
             rx.flex(
                 main_column(),
+                id="decabot-main",
+                role="main",
                 flex="1",
                 min_width="0",
                 width="100%",

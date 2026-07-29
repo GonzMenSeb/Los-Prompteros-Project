@@ -20,6 +20,10 @@ TINT_3 = "#D3D8F7"
 
 INK = "#232323"
 GREY_1 = "#707070"
+# GREY_2 and GREY_3 are ICON AND RULE colours, never type. Measured against this
+# palette's own surfaces they are 3.03:1 and 1.86:1 on white, 2.81:1 on TINT_1 —
+# all under AA, and the projector at a demo is worse than any monitor. Anything
+# that reads as words uses MUTED (4.95:1 white, 4.59:1 TINT_1) or darker.
 GREY_2 = "#949494"
 GREY_3 = "#BEBEBE"
 GREY_4 = "#E1E0DF"
@@ -29,6 +33,16 @@ WHITE = "#FFFFFF"
 SUCCESS = "#148558"
 DANGER = "#D70322"
 WARN = "#FFCD4E"
+
+# SUCCESS on SUCCESS_BG measures 4.08:1 — under AA for the small bold type the
+# "IN STOCK · SIZE RESOLVED" chip is set in. This is the same green darkened until
+# it clears on its own tint (5.37:1). SUCCESS stays the fill and the icon colour.
+SUCCESS_DEEP = "#12704A"
+
+# WARN is a SURFACE colour. #FFCD4E as type on white is 1.6:1 — invisible. When a
+# substitution has to be counted in words rather than washed behind them, this is
+# the amber that survives it (5.54:1).
+WARN_INK = "#8A6100"
 
 BG = TINT_1
 PANEL = WHITE

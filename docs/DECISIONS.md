@@ -225,3 +225,31 @@ The reasoning is that seeing the products is what makes the size question answer
 a blocked button on a demo stage is worse than a wrong size on an editable cart. The cost
 is real and accepted: a customer who ignores both asks checks out in a guessed size.
 Revisit if that ever happens to someone who is not us.
+
+### 2026-07-29 · The palette has ink colours and it has icon colours, and they are not the same list
+
+An accessibility pass measured every foreground/background pair this theme actually
+produces. Four failed AA, and all four failed the same way: a grey chosen for how it
+looked next to a border was then used to set type.
+
+- `GREY_2 #949494` — 3.03:1 on white, 2.81:1 on `TINT_1`. It was setting the "YOU"
+  eyebrow, "NO PHOTO IN CATALOG", the trace sequence numbers and the cart expiry.
+- the composer placeholder `#a3a3a3` — 2.52:1.
+- `SUCCESS` on `SUCCESS_BG` — 4.08:1, under AA for the small bold type of the
+  in-stock chip.
+
+The fix is a rule rather than a new set of tokens: **`GREY_2` and `GREY_3` are icon
+and rule colours and never set type.** Anything that reads as words uses `MUTED`
+(4.95:1 on white) or darker. Two tokens were added only where the rule left a real
+gap — `SUCCESS_DEEP` for green type on its own tint, and `WARN_INK` because `WARN`
+is a surface at 1.6:1 and there was no amber that could be written with.
+
+Also recorded, because it will look like a regression to anyone reading the diff:
+the empty state's heading is now an `h2`. It was the page's only `h1`, and it
+unmounts the moment the first message lands — so every screen after the first had a
+document with no top-level heading. `app.py` owns a visually hidden `h1` instead.
+
+The audit's one remaining detector finding — "Inter is an overused font" — is a
+verified false positive and stays. Inter is the face Decathlon themselves load, and
+the entire pitch is that this drops into their site unnoticed. The brief outranks
+the saturation warning.

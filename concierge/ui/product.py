@@ -51,6 +51,7 @@ from concierge.ui.theme import (  # noqa: F401
     SHADOW_XS,
     SUCCESS,
     SUCCESS_BG,
+    SUCCESS_DEEP,
     TEXT,
     TINT_1,
     TINT_2,
@@ -60,6 +61,7 @@ from concierge.ui.theme import (  # noqa: F401
     TRACK_TIGHTER,
     WARN,
     WARN_BG,
+    WARN_INK,
     WHITE,
 )
 
@@ -82,24 +84,45 @@ def _chip(icon: str, label, fg: str = TEXT, bg: str = TINT_1, border: str = TINT
     )
 
 
-def substituted_badge(item: KitCard) -> rx.Component:
-    """Sits on the photo. A substitution is the one thing on this card a buyer must
-    not be able to scroll past."""
+def _photo_badge(icon: str, label: str, fg: str, bg: str) -> rx.Component:
+    return rx.hstack(
+        rx.icon(icon, size=12, color=fg, flex_shrink="0"),
+        rx.text(label, size="1", weight="bold", color=fg, letter_spacing="0.06em"),
+        spacing="1",
+        align="center",
+        position="absolute",
+        top="0.55rem",
+        left="0.55rem",
+        # Bounded, not stretched. `right` would over-constrain the box and paint a
+        # full-width banner across the photo instead of a badge.
+        max_width="calc(100% - 1.1rem)",
+        z_index="1",
+        background=bg,
+        padding="0.25rem 0.5rem",
+        border_radius=RADIUS_PILL,
+        box_shadow=SHADOW_SM,
+    )
+
+
+def size_badge(item: KitCard) -> rx.Component:
+    """Sits on the photo, because the size is the one thing on this card a buyer
+    must not be able to scroll past.
+
+    Two different states, deliberately two different colours. A SUBSTITUTION is a
+    fault we already committed — amber, the warning surface. An UNCONFIRMED size is
+    an open question we are asking — brand blue, the same hue as every other thing
+    DecaBot wants an answer about. Painting both amber would tell the customer we
+    got something wrong when all we did was not know yet.
+
+    They are mutually exclusive by construction: `size_substituted` can only be
+    true when a size WAS requested, which is exactly when `size_confirmed` is true.
+    """
     return rx.cond(
         item.size_substituted,
-        rx.hstack(
-            rx.icon("triangle-alert", size=12, color=INK),
-            rx.text("SIZE SUBSTITUTED", size="1", weight="bold", color=INK, letter_spacing="0.06em"),
-            spacing="1",
-            align="center",
-            position="absolute",
-            top="0.55rem",
-            left="0.55rem",
-            z_index="1",
-            background=WARN,
-            padding="0.25rem 0.5rem",
-            border_radius=RADIUS_PILL,
-            box_shadow=SHADOW_SM,
+        _photo_badge("triangle-alert", "SIZE SUBSTITUTED", INK, WARN),
+        rx.cond(
+            ~item.size_confirmed,
+            _photo_badge("circle-help", "WHAT SIZE ARE YOU?", ON_BRAND, BRAND),
         ),
     )
 
@@ -107,7 +130,7 @@ def substituted_badge(item: KitCard) -> rx.Component:
 def product_card(item: KitCard) -> rx.Component:
     return rx.vstack(
         rx.box(
-            substituted_badge(item),
+            size_badge(item),
             rx.cond(
                 item.image_url != "",
                 rx.image(
@@ -121,7 +144,7 @@ def product_card(item: KitCard) -> rx.Component:
                 rx.center(
                     rx.vstack(
                         rx.icon("image-off", size=20, color=GREY_3),
-                        _eyebrow("NO PHOTO IN CATALOG", GREY_2),
+                        _eyebrow("NO PHOTO IN CATALOG", MUTED),
                         spacing="2",
                         align="center",
                     ),
@@ -177,7 +200,14 @@ def product_card(item: KitCard) -> rx.Component:
             ),
             rx.spacer(),
             rx.vstack(
-                _chip("ruler", item.size_label),
+                # The chip changes state rather than moving: a guessed size sits in
+                # exactly the same place as a chosen one, tinted brand instead of
+                # neutral, so scanning a grid of cards shows which rows are answered.
+                rx.cond(
+                    item.size_confirmed,
+                    _chip("ruler", item.size_label),
+                    _chip("ruler", item.size_label, BRAND, TINT_2, TINT_3),
+                ),
                 rx.cond(item.quantity > 1, _chip("x", item.quantity_label)),
                 spacing="1",
                 align="end",
@@ -314,6 +344,39 @@ def budget_line() -> rx.Component:
     )
 
 
+def _rule() -> rx.Component:
+    return rx.box(width="1px", height="2.4rem", background=GREY_4, flex_shrink="0")
+
+
+def size_prompt() -> rx.Component:
+    """The kit-level counterpart to the per-card badge. `check_size_confirmation`
+    already says this in prose, but prose scrolls away and the cart button does not."""
+    return rx.cond(
+        State.has_unconfirmed,
+        rx.hstack(
+            rx.icon("ruler", size=16, color=BRAND, flex_shrink="0"),
+            rx.text(
+                rx.cond(
+                    State.unconfirmed_count > 1,
+                    f"{State.unconfirmed_count} items are in a size I picked for you. ",
+                    "One item is in a size I picked for you. ",
+                ),
+                "Tell me your size and I'll swap it — the cart can still change.",
+                size="2",
+                color=TEXT,
+                line_height="1.6",
+            ),
+            spacing="2",
+            align="center",
+            width="100%",
+            padding="0.7rem 0.9rem",
+            background=TINT_1,
+            border_left=f"3px solid {BRAND}",
+            border_radius=f"0 {RADIUS_SM} {RADIUS_SM} 0",
+        ),
+    )
+
+
 def kit_summary() -> rx.Component:
     return rx.vstack(
         rx.hstack(
@@ -322,29 +385,39 @@ def kit_summary() -> rx.Component:
             rx.spacer(),
             # Every KitItem is `available: Literal[True]` and size-resolved by the
             # time it reaches here, so this claim is structural, not a promise.
-            _chip("circle-check-big", "IN STOCK · SIZE RESOLVED", SUCCESS, SUCCESS_BG, "transparent"),
+            # SUCCESS_DEEP, not SUCCESS: on its own 10% tint the brighter green is
+            # 4.08:1, under AA for type this small.
+            _chip("circle-check-big", "IN STOCK", SUCCESS_DEEP, SUCCESS_BG, "transparent"),
             width="100%",
             align="center",
             spacing="2",
         ),
         rx.flex(
             stat("KIT TOTAL", State.total_display, BRAND, big=True),
-            rx.box(width="1px", height="2.4rem", background=GREY_4, flex_shrink="0"),
+            _rule(),
             stat("ITEMS", State.item_count),
-            rx.box(width="1px", height="2.4rem", background=GREY_4, flex_shrink="0"),
-            stat("SIZE SWAPS", State.substitution_count),
+            # These two were rendered unconditionally and read 0 on almost every
+            # run. A stat that is always zero trains people to stop reading the row,
+            # which is the opposite of what a disclosure is for — so each appears
+            # only when it has something to disclose.
+            rx.cond(
+                State.substitution_count > 0,
+                rx.fragment(_rule(), stat("SIZE SWAPS", State.substitution_count, WARN_INK)),
+            ),
+            rx.cond(
+                State.has_unconfirmed,
+                rx.fragment(_rule(), stat("SIZES TO CONFIRM", State.unconfirmed_count, BRAND)),
+            ),
             rx.cond(
                 State.has_budget,
-                rx.fragment(
-                    rx.box(width="1px", height="2.4rem", background=GREY_4, flex_shrink="0"),
-                    stat("BUDGET", State.budget_display, MUTED),
-                ),
+                rx.fragment(_rule(), stat("BUDGET", State.budget_display, MUTED)),
             ),
             gap="1.5rem",
             align="center",
             wrap="wrap",
             width="100%",
         ),
+        size_prompt(),
         budget_line(),
         spacing="4",
         width="100%",
@@ -364,7 +437,12 @@ def kit_grid() -> rx.Component:
             unservable_notice(),
             rx.grid(
                 rx.foreach(State.cards, product_card),
-                columns=rx.breakpoints(initial="1", sm="2", lg="3"),
+                # `lg` is the same breakpoint at which the 384px audit rail moves
+                # beside this column, so three cards here were being asked to share
+                # what was left of a 1024px viewport — roughly 200px each, with the
+                # product title clamped to two lines of nothing. Three columns wait
+                # for xl, where the space actually exists.
+                columns=rx.breakpoints(initial="1", sm="2", lg="2", xl="3"),
                 gap="0.9rem",
                 width="100%",
             ),

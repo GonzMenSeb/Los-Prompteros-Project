@@ -107,6 +107,9 @@ class KitCard(BaseModel):
     quantity_label: str
     price_display: str
     size_substituted: bool
+    # A guessed size looked identical to a chosen one on the card, so the only
+    # trace of it was a sentence in the chat log that scrolls away.
+    size_confirmed: bool
     rationale: str
 
 
@@ -125,6 +128,7 @@ def to_card(item: KitItem) -> KitCard:
         ),
         price_display=minor_to_display(item.price_minor),
         size_substituted=item.size_substituted,
+        size_confirmed=item.size_confirmed,
         rationale=item.rationale,
     )
 
@@ -237,6 +241,14 @@ class State(rx.State):
     @rx.var
     def substitution_count(self) -> int:
         return sum(1 for i in self.kit_items if i.size_substituted)
+
+    @rx.var
+    def unconfirmed_count(self) -> int:
+        return sum(1 for i in self.kit_items if not i.size_confirmed)
+
+    @rx.var
+    def has_unconfirmed(self) -> bool:
+        return self.unconfirmed_count > 0
 
     @rx.var
     def walkthrough_active(self) -> bool:

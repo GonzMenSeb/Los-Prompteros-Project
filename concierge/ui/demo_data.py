@@ -79,9 +79,14 @@ def _kit_item(
     *,
     requested_size: str | None = None,
     quantity: int = 1,
+    sized: bool = True,
 ) -> KitItem:
     """`requested_size` that is not in stock resolves to the nearest in-stock
-    variant and flags the substitution — the same contract as resolve_variant()."""
+    variant and flags the substitution — the same contract as resolve_variant().
+
+    `sized=False` is shared kit with no size to ask about, mirroring the loop's
+    `per_person` test. Everything else with a size the fixture did not request
+    comes back unconfirmed, exactly as a live run would."""
     product = catalog(handle)[index]
     in_stock = [v for v in product.variants if v.available]
     if not in_stock:
@@ -103,6 +108,7 @@ def _kit_item(
         quantity=quantity,
         available=True,
         size_substituted=substituted,
+        size_confirmed=requested_size is not None or not sized or len(in_stock) == 1,
         rationale=rationale,
     )
 
@@ -143,10 +149,12 @@ def demo_kit() -> Kit:
                 "Overnight lows near 2 °C. The fleece is what makes the shell work.",
                 requested_size="M",
             ),
+            # No requested_size, and this fleece stocks ten. That is the unconfirmed
+            # case: DecaBot put a size in the cart because it had to put something
+            # there, and the card says so rather than looking decided.
             _kit_item(
                 "mid_layer", "hiking-fleeces-mid-layers", 7,
                 "Warm hiking fleece for camp and the pre-dawn start.",
-                requested_size="M",
             ),
             _kit_item(
                 "base_layer", "base-layers", 11,
@@ -172,6 +180,7 @@ def demo_kit() -> Kit:
                 "tent", "camping-tents-2-3-person", 0,
                 "Two-person waterproof pop-up. Pitching fast matters when the cloud "
                 "comes in.",
+                sized=False,
             ),
             _kit_item(
                 "sleeping_bag", "sleeping-bags", 1,
@@ -180,6 +189,7 @@ def demo_kit() -> Kit:
                 "rather than pretending it is enough: sleep in the base layer and the "
                 "fleece, or add a liner from elsewhere.",
                 quantity=2,
+                sized=False,
             ),
         ],
         unservable_slots=[

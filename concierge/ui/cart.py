@@ -49,6 +49,7 @@ from concierge.ui.theme import (  # noqa: F401
     SHADOW_XS,
     SUCCESS,
     SUCCESS_BG,
+    SUCCESS_DEEP,
     TEXT,
     TINT_1,
     TINT_2,
@@ -58,6 +59,7 @@ from concierge.ui.theme import (  # noqa: F401
     TRACK_TIGHTER,
     WARN,
     WARN_BG,
+    WARN_INK,
     WHITE,
 )
 
@@ -196,7 +198,7 @@ def cart_block() -> rx.Component:
                 ),
                 rx.cond(
                     State.cart_expires_at != "",
-                    rx.text(f"Expires {State.cart_expires_at}", size="1", color=GREY_2, font_family=MONO),
+                    rx.text(f"Expires {State.cart_expires_at}", size="1", color=MUTED, font_family=MONO),
                 ),
                 spacing="1",
                 align="start",
