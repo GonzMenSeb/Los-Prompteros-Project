@@ -22,8 +22,10 @@ explanation.
 
 ### `concierge/obs/bundle.py` — new module
 
-One pure render function. It imports neither Reflex nor `concierge.domain`, so
-`tests/test_bundle.py` can build a snapshot literally and assert on a string.
+One pure render function. No Reflex import, so `tests/test_bundle.py` can build a
+snapshot literally and assert on a string. It does import `minor_to_display` from
+`domain/models.py` — that function is documented there as *"the ONLY place minor units
+become human text"*, and the convention outranks keeping this module import-free.
 
 ```python
 @dataclass(frozen=True)
@@ -165,6 +167,12 @@ reasoning applies.
   mirror.
 - The component tree compiles, and a real browser click actually fills the clipboard.
   A passing handler test does not prove the clipboard write survived the round trip.
+
+**What the browser caught that nothing else did:** Reflex returns state containers wrapped
+in `MutableProxy`, and `json.dumps` misses it — its encoder does an exact type check, so
+every payload came out as a Python repr inside a JSON string. Every handler test passed,
+because they asserted substrings. `state.plain()` rebuilds real containers, and
+`verify_ui.py` now asserts real JSON rather than presence.
 
 ## Documentation
 

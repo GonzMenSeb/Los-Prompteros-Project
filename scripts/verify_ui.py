@@ -103,9 +103,84 @@ async def main() -> int:
               any(r.event == "search.grounded" for r in state.trace))
     )
 
+    print("\ncopy_run …")
+    results.append(
+        check(
+            "_raw_trace mirrors the panel rows",
+            len(state._raw_trace) == len(state.trace),
+            f"{len(state._raw_trace)} raw vs {len(state.trace)} rows",
+        )
+    )
+    # The panel row carries `summarise()` — a flat string. The mirror has to carry the
+    # structure itself, or the bundle is just the screenshot with extra steps.
+    results.append(
+        check(
+            "raw events carry structured payloads, not flattened strings",
+            all(isinstance(e["payload"], dict) for e in state._raw_trace),
+        )
+    )
+    results.append(
+        check(
+            "raw events keep native value types the summary stringifies",
+            any(
+                isinstance(v, (int, float, bool))
+                for e in state._raw_trace
+                for v in e["payload"].values()
+            ),
+        )
+    )
+    for _ in state.copy_run():
+        pass
+    text = state._last_bundle
+    results.append(check("bundle built", len(text) > 0, f"{len(text)} chars"))
+    results.append(check("bundle carries the conversation", "swap the tent for the cheaper one" in text))
+    results.append(check("bundle carries a guardrail event", "guardrail" in text))
+    results.append(check("bundle carries the kit", "## Kit" in text and "gid://shopify/" in text))
+    # Reflex hands state containers back as MutableProxy, which json.dumps misses — the
+    # payloads then arrive as Python reprs inside a JSON string. Caught in a browser, not
+    # by any handler test, because only a real round trip stores them through Reflex.
+    results.append(
+        check('payloads are real JSON, not Python reprs', '"turn": 1' in text and "{'turn':" not in text)
+    )
+    results.append(
+        check("nothing is on the wire until a copy fails", state.copy_fallback == "")
+    )
+
+    print("\ncopy_finished …")
+    state.copy_finished(True)
+    results.append(check("a confirmed write shows ok", state.copy_status == "ok"))
+    results.append(check("a confirmed write publishes no fallback", state.copy_fallback == ""))
+    state.copy_finished(False)
+    results.append(check("a refused write shows failed", state.copy_status == "failed"))
+    results.append(
+        check("a refused write publishes the text to select", state.copy_fallback == text)
+    )
+
+    print("\ncopy_run behind a closed gate …")
+    # The event is callable over the wire whatever is on screen — same reasoning as
+    # confirm_cart. Patched rather than mocked: GATE_ON is read at module import.
+    import concierge.state as state_mod
+
+    locked = State(_reflex_internal_init=True)
+    locked._raw_trace = [{"seq": 1, "ts": 0.0, "event": "x", "payload": {}, "level": "info"}]
+    was_on = state_mod.GATE_ON
+    state_mod.GATE_ON = True
+    try:
+        for _ in locked.copy_run():
+            pass
+    finally:
+        state_mod.GATE_ON = was_on
+    results.append(check("copy_run is a no-op while locked", locked._last_bundle == ""))
+
     print("\nclear …")
     state.clear()
     results.append(check("clear resets everything", not state.kit_items and not state.trace and not state.cart_url))
+    results.append(
+        check(
+            "clear empties the raw mirror and the copy state",
+            not state._raw_trace and not state._last_bundle and state.copy_status == "",
+        )
+    )
 
     print("\nKitItem without a photo …")
     # No fixture product lacks an image, so this path is only reachable from live

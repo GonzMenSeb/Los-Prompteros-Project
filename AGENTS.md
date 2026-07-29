@@ -178,6 +178,22 @@ Re-measured **25 Jul 2026**, and the numbers moved. `SPEC.md §3.2` and
   **Pin the ports**, or Reflex's "next available port if taken" behaviour silently
   moves the frontend and desyncs the tunnel.
 - `cors_allowed_origins` defaults to `("*",)`, so CORS needs no work.
+- **`rx.set_clipboard` fires on the websocket RESPONSE — outside the click's user
+  activation — and reports nothing back.** Chromium usually allows it because it
+  auto-grants `clipboard-write` to the focused tab; Firefox and Safari raise
+  `NotAllowedError`, and either way there is no success signal, so a "Copied ✓" badge
+  driven by it is a claim rather than evidence. `copy_run` therefore uses
+  `rx.run_script(js, callback=State.copy_finished)`: the compiled frontend **awaits the
+  promise** before invoking the callback (`.web/utils/state.js`), so the badge reports
+  what the write actually returned. **Do not "simplify" this back to `set_clipboard`** —
+  it silently reintroduces a green tick over a failed copy.
+- **Reflex hands state containers back wrapped in `MutableProxy` (a `wrapt.ObjectProxy`),
+  and `json.dumps` does not see through it.** `isinstance(proxy, dict)` is True, but the
+  encoder's exact type check misses the proxy and falls through to `default=`, so every
+  payload serialises as a **Python repr inside a JSON string** — `"{'turn': 1}"` instead
+  of `{"turn": 1}`. `state.plain()` rebuilds real containers before anything is dumped.
+  This is invisible to handler tests that only assert substrings, and was caught only by
+  pasting a real bundle out of a browser.
 
 ### Container deployment  (`Dockerfile`, hosted at `decabot.web.vespiridion.org`)
 

@@ -238,3 +238,44 @@ ships to the client.
 Rejected: building the frontend at container start. It would let one image serve any
 `api_url`, at the cost of bun plus 277 MB of `node_modules` in the runtime image and a
 multi-minute boot before the first request. The rewrite above makes it unnecessary.
+
+## The audit trail is copyable, and the copy button does not lie
+
+The panel renders `summarise()`, which clamps each payload value at 120 characters and
+the whole line at 300. That is right for something a judge reads over your shoulder while
+the agent works, and useless afterwards: debugging a failed run with an AI meant
+screenshotting a panel whose payloads were already truncated. One button in the audit
+header now puts the whole run on the clipboard — conversation, trace with **full**
+payloads, kit, budget and cart — as text that needs no explanation when pasted.
+
+**The full payloads live in a backend-only var.** `trace` crosses the websocket on every
+drain, so widening `TraceRow` would have made every run more expensive to watch in order
+to make a rare copy richer. `_raw_trace` (leading underscore → never serialized to any
+browser) mirrors it with the events intact. `_last_bundle` is the same trick: the
+rendered text stays server-side, and only a *refused* copy publishes it to the client so
+it can be selected by hand.
+
+**The confirmation reports what happened, not what was attempted.** `rx.set_clipboard`
+was rejected: it fires on the websocket response, one round trip after the click and
+outside its transient user activation, which Firefox and Safari refuse — and it returns
+no result, so the green tick would have appeared over a failed copy. `run_script` with a
+callback gets the promise's actual result back, and a blocked write renders the text for
+manual selection instead of a lie. Consistent with the guardrail principle: a check
+written in Python is a guarantee, a badge written in hope is not.
+
+**`gate.unlocked`, `gate.refused` and `session.priority` were emitted with no sink bound**
+and so had never reached `State.trace` at all — only the process-wide ring buffer. They
+now bind a sink like every other handler, which fixes the panel as well as the bundle.
+Reading `trace.recent()` instead was rejected outright: `_GLOBAL` is process-wide, and on
+the public URL it would splice other visitors' sessions into one user's bundle.
+
+**The cart's `continue_url` is not redacted**, deliberately. It resolves to a working
+`/cart/c/<token>?key=<key>`, which is frequently the thing being debugged; the cart
+carries no payment and the README already publishes such links. The bundle header says so
+rather than leaving it a surprise.
+
+Found only in a browser: Reflex returns state containers as `MutableProxy`, which
+`json.dumps` misses, so payloads first came out as Python reprs inside JSON strings.
+Handler tests asserting substrings all passed. `state.plain()` fixes it and
+`verify_ui.py` now asserts real JSON — the class of bug that only a real round trip
+exposes.

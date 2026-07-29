@@ -17,6 +17,7 @@ import hashlib
 import hmac
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from concierge import walkthrough
 from concierge.domain.models import CartResult, KitItem, minor_to_display
+from concierge.obs import bundle
 from concierge.obs.trace import TraceEvent, bind_sink, emit
 from concierge.ui import demo_data
 
@@ -144,6 +146,25 @@ def to_card(item: KitItem) -> KitCard:
     )
 
 
+def plain(value: Any) -> Any:
+    """Reflex hands back state containers wrapped in `MutableProxy` (a wrapt
+    ObjectProxy). `isinstance` sees through it; `json.dumps` does NOT — its encoder does
+    an exact type check, misses the proxy and falls through to `default=`, which turns
+    every payload into a Python repr inside a JSON string. Rebuild real containers first.
+    """
+    if isinstance(value, dict):
+        return {str(k): plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [plain(v) for v in value]
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        return str(value)
+    return str(value)
+
+
 def summarise(payload: dict[str, Any]) -> str:
     """Trace payloads come from four different lanes with arbitrary nesting.
     Flatten to one scalar line so the panel never has to walk an unknown shape."""
@@ -169,6 +190,19 @@ class State(rx.State):
 
     trace: list[TraceRow] = []
     show_trace: bool = True
+
+    # The panel renders `summarise()`, which clamps values at 120 chars and the line at
+    # 300. The debugging bundle needs the payloads whole, and `trace` crosses the wire on
+    # every drain — so the full events live in a BACKEND-ONLY var (leading underscore),
+    # which Reflex never serializes to any browser. `_last_bundle` is the same trick: a
+    # successful copy then costs nothing on the wire.
+    _raw_trace: list[dict[str, Any]] = []
+    _last_bundle: str = ""
+
+    # "" | "ok" | "failed". Set from what the clipboard write actually RETURNED — a green
+    # tick that fires on dispatch rather than on success is a claim, not evidence.
+    copy_status: str = ""
+    copy_fallback: str = ""
 
     cart_id: str = ""
     cart_url: str = ""
@@ -295,6 +329,7 @@ class State(rx.State):
                     summary=summarise(ev.payload),
                 )
             )
+            self._raw_trace.append(ev.as_dict())
         sink.clear()
         return True
 
@@ -324,6 +359,76 @@ class State(rx.State):
     def toggle_trace(self):
         self.show_trace = not self.show_trace
 
+    def _reset_copy(self) -> None:
+        self._last_bundle = ""
+        self.copy_status = ""
+        self.copy_fallback = ""
+
+    def _snapshot(self) -> bundle.RunSnapshot:
+        return bundle.RunSnapshot(
+            stamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            mode="fixture" if FIXTURE_MODE else "live",
+            gated=GATE_ON,
+            lane="reserved" if self.is_vip else "public",
+            messages=[
+                {"role": m.role, "content": m.content, "citations": [c.url for c in m.citations]}
+                for m in self.messages
+            ],
+            events=plain(self._raw_trace),
+            items=[
+                {
+                    "slot": i.slot,
+                    "product_title": i.product_title,
+                    "product_url": i.product_url,
+                    "variant_id": i.variant_id,
+                    "size_label": i.size_label,
+                    "quantity": i.quantity,
+                    "price_minor": i.price_minor,
+                    "size_substituted": i.size_substituted,
+                    "rationale": i.rationale,
+                }
+                for i in self.kit_items
+            ],
+            unservable=list(self.unservable_slots),
+            budget_minor=self.budget_minor,
+            cart={
+                "cart_id": self.cart_id,
+                "url": self.cart_url,
+                "total_minor": self.cart_total_minor,
+                "line_count": self.cart_line_count,
+                "expires_at": self.cart_expires_at,
+            }
+            if self.cart_url
+            else None,
+        )
+
+    @rx.event
+    def copy_run(self):
+        """Put the whole run on the clipboard as text.
+
+        `rx.set_clipboard` would fire on the websocket RESPONSE — one round trip after
+        the click, outside its transient user activation — which Firefox and Safari
+        refuse, and it reports nothing back either way. `run_script` with a callback is
+        the honest form: the compiled frontend awaits the promise and hands the result to
+        `copy_finished`.
+        """
+        if GATE_ON and not self.unlocked:
+            return
+        self.copy_fallback = ""
+        self._last_bundle = bundle.render(self._snapshot())
+        yield rx.run_script(
+            f"navigator.clipboard?.writeText({json.dumps(self._last_bundle)})"
+            f".then(() => true, () => false) ?? false",
+            callback=State.copy_finished,
+        )
+
+    @rx.event
+    def copy_finished(self, ok: bool):
+        self.copy_status = "ok" if ok else "failed"
+        # Only a refused write puts the text on the wire, and only so it can be selected
+        # by hand. A working copy never pays for it.
+        self.copy_fallback = "" if ok else self._last_bundle
+
     def toggle_reveal(self):
         self.gate_reveal = not self.gate_reveal
 
@@ -337,13 +442,22 @@ class State(rx.State):
         yield
 
         await asyncio.sleep(_GATE_DELAY)
-        if hmac.compare_digest((form_data.get("password") or "").strip(), GATE_PASSWORD):
-            self.unlocked = True
-            self.gate_key = _GATE_DIGEST
-            emit("gate.unlocked", {}, level="guardrail")
-        else:
-            self.gate_error = "That is not the password."
-            emit("gate.refused", {}, level="guardrail")
+        # Bound so these two land in THIS session's trace. Without a sink they reach only
+        # the process-wide ring buffer, and the panel — and the copied bundle — would be
+        # missing a guardrail verdict that did fire.
+        sink: list[TraceEvent] = []
+        bind_sink(sink)
+        try:
+            if hmac.compare_digest((form_data.get("password") or "").strip(), GATE_PASSWORD):
+                self.unlocked = True
+                self.gate_key = _GATE_DIGEST
+                emit("gate.unlocked", {}, level="guardrail")
+            else:
+                self.gate_error = "That is not the password."
+                emit("gate.refused", {}, level="guardrail")
+            self._drain(sink)
+        finally:
+            bind_sink(None)
 
         self.gate_busy = False
         yield
@@ -355,6 +469,8 @@ class State(rx.State):
         self.unservable_slots = []
         self.budget_minor = None
         self.trace = []
+        self._raw_trace = []
+        self._reset_copy()
         self._reset_cart()
         self.is_thinking = False
         self.awaiting_confirmation = False
@@ -377,6 +493,9 @@ class State(rx.State):
 
         self.draft = ""
         self.error = ""
+        # No timed reset: Reflex holds the session state lock for a handler's duration,
+        # so sleeping to clear a badge would serialize that session's other events.
+        self._reset_copy()
         self.messages.append(ChatMessage(role="user", content=text))
         self.is_thinking = True
         self.status = "Reading the conditions…"
@@ -582,7 +701,15 @@ class State(rx.State):
         params = self.router.url.query_parameters
         if VIP_TOKEN and params.get("vip", "") == VIP_TOKEN:
             self.is_vip = True
-            emit("session.priority", {"vip": True}, level="guardrail")
+            # Same reasoning as `unlock`. Bound around this emit ONLY — `run_walkthrough`
+            # below binds its own sinks per turn.
+            sink: list[TraceEvent] = []
+            bind_sink(sink)
+            try:
+                emit("session.priority", {"vip": True}, level="guardrail")
+                self._drain(sink)
+            finally:
+                bind_sink(None)
 
         phase = params.get("walkthrough", "").strip().lower()
         if phase in ("prewarm", "onstage", "all") and not self.walkthrough_autostarted:

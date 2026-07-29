@@ -122,6 +122,15 @@ pattern matches the invoking shell's own command line and kills the caller.
       injection blocked with prices unmoved → **real cart, 12 lines**, `continue_url`
       confirmed 301-redirecting to `www.decathlon.com/cart/c/…`. Screenshots in
       `docs/images/`, embedded in the README.
+- [x] **One-click run bundle for AI debugging**, 28 Jul. A copy button in the audit-trail
+      header puts the whole run — conversation, trace with **full** payloads, kit, budget,
+      cart — on the clipboard as text (`concierge/obs/bundle.py`). Payloads live in the
+      backend-only `_raw_trace`, so the panel's wire cost is unchanged. Verified in a real
+      browser: 8,490 characters pasted back with a trusted `Ctrl+V`, 16 real JSON payloads
+      and zero Python reprs; with `navigator.clipboard` removed the badge turns red and
+      the text renders for manual selection instead of showing a false tick.
+      `gate.unlocked` / `gate.refused` / `session.priority` now bind a sink and reach the
+      panel too — they never had.
 
 ## KNOWN ISSUES — both will show on camera
 

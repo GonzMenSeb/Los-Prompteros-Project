@@ -200,6 +200,82 @@ def trace_body() -> rx.Component:
     )
 
 
+def copy_button() -> rx.Component:
+    """Copies the whole run — conversation, full payloads, kit, cart — for pasting into
+    an AI. The icon reports what the clipboard write RETURNED, not that one was sent."""
+    return rx.tooltip(
+        rx.button(
+            rx.match(
+                State.copy_status,
+                ("ok", rx.icon("check", size=15)),
+                ("failed", rx.icon("circle-alert", size=15)),
+                rx.icon("copy", size=15),
+            ),
+            on_click=State.copy_run,
+            variant="ghost",
+            size="1",
+            cursor="pointer",
+            color=rx.match(
+                State.copy_status,
+                ("ok", SUCCESS),
+                ("failed", DANGER),
+                MUTED,
+            ),
+            disabled=State.trace.length() == 0,
+            aria_label="Copy this run as text for debugging",
+        ),
+        content=rx.match(
+            State.copy_status,
+            ("ok", "Copied — paste it into an AI"),
+            ("failed", "Your browser blocked the clipboard"),
+            "Copy this run for debugging",
+        ),
+    )
+
+
+def copy_fallback() -> rx.Component:
+    """Only reachable when the clipboard write was refused — an insecure context, or a
+    browser that will not write outside a user gesture. The text is on the wire only in
+    this case, and only so it can be selected by hand."""
+    return rx.cond(
+        State.copy_status == "failed",
+        rx.vstack(
+            rx.hstack(
+                rx.icon("circle-alert", size=14, color=DANGER, flex_shrink="0"),
+                rx.text(
+                    "Your browser blocked the clipboard. Select this and copy it by hand.",
+                    size="1",
+                    color=DANGER,
+                    line_height="1.5",
+                ),
+                spacing="2",
+                align="center",
+                width="100%",
+            ),
+            rx.text_area(
+                value=State.copy_fallback,
+                read_only=True,
+                rows="8",
+                width="100%",
+                font_family=MONO,
+                font_size="0.7rem",
+                background=WHITE,
+                border=f"1px solid {BORDER}",
+                border_radius=RADIUS_SM,
+                on_click=rx.set_focus("db-copy-fallback"),
+                id="db-copy-fallback",
+            ),
+            spacing="2",
+            width="100%",
+            padding="0.6rem",
+            margin_bottom="0.6rem",
+            background=DANGER_BG,
+            border=f"1px solid {DANGER}",
+            border_radius=RADIUS_SM,
+        ),
+    )
+
+
 def trace_header() -> rx.Component:
     return rx.hstack(
         rx.icon("activity", size=16, color=BRAND),
@@ -216,6 +292,7 @@ def trace_header() -> rx.Component:
         ),
         rx.spacer(),
         rx.cond(State.is_thinking, rx.spinner(size="1", color=BRAND)),
+        copy_button(),
         rx.button(
             rx.icon("chevron-right", size=15),
             on_click=State.toggle_trace,
@@ -244,6 +321,7 @@ def trace_panel() -> rx.Component:
             rx.vstack(
                 trace_header(),
                 rx.box(
+                    copy_fallback(),
                     trace_body(),
                     class_name="db-scroll",
                     padding="0.6rem",
