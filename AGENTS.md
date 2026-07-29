@@ -339,7 +339,8 @@ reasoning.
 | `rxconfig.py` | recompile the frontend; note the new URL in `docs/RUNBOOK.md` |
 | the build's state | tick it off in `docs/HANDOFF.md` — another agent resumes from there |
 | an architectural choice | append to `docs/DECISIONS.md` — never edit a past entry |
-| `Dockerfile` or anything the container reads | rebuild, re-push, redeploy per `docs/DEPLOY.md` |
+| `Dockerfile` or anything the container reads | nothing — merging to `main` rebuilds, re-pushes and redeploys. `docs/DEPLOY.md` covers the by-hand path and the Jenkins job |
+| the touched-path gate in `infra/jenkins/Jenkinsfile` | `docs/DEPLOY.md` § Ship a change — it lists which paths ship and which do not |
 
 **PR checklist:** facts registry still accurate · `make check` green · `make verify`
 green if `commerce/` changed · `DECISIONS.md` appended if architectural.
