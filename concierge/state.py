@@ -46,6 +46,28 @@ FIXTURE_MODE = os.environ.get("CONCIERGE_FIXTURE_MODE", "0") not in ("0", "false
 _STEP_DELAY = 0.25
 _POLL_INTERVAL = 0.15
 
+# A backoff is the one wait the user must not read as the app hanging: catalog._get
+# can sit on a retry for seconds, and "Reading the conditions…" under a spinner is a
+# lie about what is happening. Driven off the trace rather than threaded back through
+# run_turn, because the trace is already drained into the UI mid-turn and this needs
+# to land WHILE the turn is still running.
+#
+# Two levels, both honest, and neither quotes a wait: still trying, and gave up on
+# that request and carried on. No storefront figure is worth standing behind — its
+# Retry-After says 60 s and does not honour it — and MCP's is ~48 minutes.
+_RETRYING = "Decathlon is rate-limiting me — easing off and trying again…"
+_DEGRADED = "Decathlon is still rate-limiting me — carrying on with what I could read…"
+
+_THROTTLE_STATUS = {
+    "catalog.rate_limited": _RETRYING,
+    "catalog.retry": _RETRYING,
+    "ucp.rate_limited": _RETRYING,
+    "catalog.unavailable": _DEGRADED,
+    "catalog.taxonomy_stale": _DEGRADED,
+    "ucp.rate_limited_paced": _DEGRADED,
+    "guardrail.collection_unchecked": _DEGRADED,
+}
+
 # Public-load protection, for when a QR code points a room full of phones at the same
 # tunnel the demo is running on.
 #
@@ -213,6 +235,9 @@ class State(rx.State):
     is_thinking: bool = False
     awaiting_confirmation: bool = False
     status: str = ""
+    # Styling only — `status` carries the words. Separate so the spinner can change
+    # character without the UI having to string-match the message.
+    throttled: bool = False
     error: str = ""
 
     is_vip: bool = False
@@ -330,6 +355,9 @@ class State(rx.State):
                 )
             )
             self._raw_trace.append(ev.as_dict())
+            throttle = _THROTTLE_STATUS.get(ev.event)
+            if throttle is not None:
+                self.throttled, self.status = True, throttle
         sink.clear()
         return True
 
@@ -486,6 +514,7 @@ class State(rx.State):
         self.is_thinking = False
         self.awaiting_confirmation = False
         self.status = ""
+        self.throttled = False
         self.error = ""
         self.draft = ""
         self.walkthrough_stage = 0
@@ -510,6 +539,7 @@ class State(rx.State):
         self.messages.append(ChatMessage(role="user", content=text))
         self.is_thinking = True
         self.status = "Reading the conditions…"
+        self.throttled = False
         self.awaiting_confirmation = False
         # A new turn supersedes the previous cart. Leaving these set would keep
         # `has_cart` true and permanently hide the confirm button on turn two.
@@ -560,6 +590,7 @@ class State(rx.State):
             bind_sink(None)
             self.is_thinking = False
             self.status = ""
+            self.throttled = False
         yield
 
     async def _fixture_turn(self, sink: list[TraceEvent]):
@@ -644,6 +675,7 @@ class State(rx.State):
         self.awaiting_confirmation = False
         self.is_thinking = True
         self.status = "Creating the cart at Decathlon…"
+        self.throttled = False
         self.error = ""
         yield
 
@@ -687,6 +719,7 @@ class State(rx.State):
             bind_sink(None)
             self.is_thinking = False
             self.status = ""
+            self.throttled = False
         yield
 
     @rx.event
