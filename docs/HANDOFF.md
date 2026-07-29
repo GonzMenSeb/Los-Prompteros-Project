@@ -126,11 +126,14 @@ pattern matches the invoking shell's own command line and kills the caller.
       header puts the whole run — conversation, trace with **full** payloads, kit, budget,
       cart — on the clipboard as text (`concierge/obs/bundle.py`). Payloads live in the
       backend-only `_raw_trace`, so the panel's wire cost is unchanged. Verified in a real
-      browser: 8,490 characters pasted back with a trusted `Ctrl+V`, 16 real JSON payloads
-      and zero Python reprs; with `navigator.clipboard` removed the badge turns red and
-      the text renders for manual selection instead of showing a false tick.
+      browser **on dev, fixture mode, gate off**: 8,490 characters pasted back with a
+      trusted `Ctrl+V`, 16 real JSON payloads and zero Python reprs; with
+      `navigator.clipboard` removed the badge turns red and the text renders for manual
+      selection instead of showing a false tick.
       `gate.unlocked` / `gate.refused` / `session.priority` now bind a sink and reach the
-      panel too — they never had.
+      panel too — they never had. Because a *refused* password now leaves a row in the
+      trace, the button is gated on `can_copy_run`, not on the row count, or a locked-out
+      visitor would get an enabled button that silently does nothing.
 
 ## KNOWN ISSUES — both will show on camera
 

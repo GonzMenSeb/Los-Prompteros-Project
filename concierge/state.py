@@ -356,6 +356,13 @@ class State(rx.State):
     def gate_on(self) -> bool:
         return GATE_ON
 
+    @rx.var
+    def can_copy_run(self) -> bool:
+        """Binding a sink in `unlock` means a REFUSED password now puts a row in the
+        trace — so a non-empty trace alone would enable the copy button for someone who
+        is still locked out, and `copy_run` would then refuse in silence."""
+        return bool(self.trace) and not (GATE_ON and not self.unlocked)
+
     def toggle_trace(self):
         self.show_trace = not self.show_trace
 
@@ -424,6 +431,10 @@ class State(rx.State):
 
     @rx.event
     def copy_finished(self, ok: bool):
+        """No gate re-check here, unlike every other handler — and that is deliberate.
+        This one spends nothing and reveals nothing: state is per session, and a locked
+        caller's `copy_run` returned before writing `_last_bundle`, so the worst a forged
+        call can do is echo this session's own empty string back to itself."""
         self.copy_status = "ok" if ok else "failed"
         # Only a refused write puts the text on the wire, and only so it can be selected
         # by hand. A working copy never pays for it.

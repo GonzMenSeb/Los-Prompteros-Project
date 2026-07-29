@@ -221,7 +221,7 @@ def copy_button() -> rx.Component:
                 ("failed", DANGER),
                 MUTED,
             ),
-            disabled=State.trace.length() == 0,
+            disabled=~State.can_copy_run,
             aria_label="Copy this run as text for debugging",
         ),
         content=rx.match(

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 
-from concierge.state import State, summarise, to_card
+from concierge.state import State, TraceRow, summarise, to_card
 
 
 def check(label: str, ok: bool, detail: str = "") -> bool:
@@ -162,7 +162,11 @@ async def main() -> int:
     import concierge.state as state_mod
 
     locked = State(_reflex_internal_init=True)
-    locked._raw_trace = [{"seq": 1, "ts": 0.0, "event": "x", "payload": {}, "level": "info"}]
+    # Exactly the state a refused password leaves behind: one guardrail row, still locked.
+    locked.trace = [TraceRow(seq=1, event="gate.refused", level="guardrail", summary="")]
+    locked._raw_trace = [
+        {"seq": 1, "ts": 0.0, "event": "gate.refused", "payload": {}, "level": "guardrail"}
+    ]
     was_on = state_mod.GATE_ON
     state_mod.GATE_ON = True
     try:
@@ -171,6 +175,16 @@ async def main() -> int:
     finally:
         state_mod.GATE_ON = was_on
     results.append(check("copy_run is a no-op while locked", locked._last_bundle == ""))
+    # A refused password now drains a row into `trace`, so "trace is non-empty" alone
+    # would light the button up for someone still locked out — and clicking it would do
+    # nothing at all.
+    state_mod.GATE_ON = True
+    try:
+        results.append(check("the button stays disabled while locked", locked.can_copy_run is False))
+        locked.unlocked = True
+        results.append(check("unlocking enables it", locked.can_copy_run is True))
+    finally:
+        state_mod.GATE_ON = was_on
 
     print("\nclear …")
     state.clear()
