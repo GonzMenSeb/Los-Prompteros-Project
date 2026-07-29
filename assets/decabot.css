@@ -118,6 +118,25 @@ body {
   animation: db-halo 1.7s ease-out infinite;
 }
 
+/* Wrong password. The card is the whole page, so the rejection has to be felt. */
+@keyframes db-shake {
+  10%,
+  90% {
+    transform: translateX(-2px);
+  }
+  30%,
+  70% {
+    transform: translateX(4px);
+  }
+  50% {
+    transform: translateX(-5px);
+  }
+}
+
+.db-shake {
+  animation: db-shake 420ms var(--db-ease) both;
+}
+
 /* Indeterminate progress rail for the running walkthrough. */
 @keyframes db-sweep {
   from {

@@ -197,6 +197,233 @@ previous entry no longer applies: MIT asks nothing of anyone who deploys a fork.
 Leaving the AGPL entry above in place rather than deleting it, per the append-only rule.
 A later reader should be able to see that AGPL was considered and why it was dropped.
 
+### 2026-07-28 · Hosted permanently at decabot.web.vespiridion.org, behind an in-app password
+
+The demo was tunnel-only: `make tunnel` mints two Cloudflare quick-tunnel URLs per run,
+and `api_url` is compiled into the frontend bundle, so every restart invalidated any QR
+code already in the wild. That is fine for a rehearsal and bad for anything a judge or a
+recruiter might open a week later. It now also runs as a container on the team's own VPS
+under Ansible management (`vps-infrastructure`, role `decabot`), on the same Traefik +
+Let's Encrypt plane as the other services there. The tunnel path is untouched and stays
+the demo-day primary — it needs no VPS and no DNS propagation.
+
+**One port, not two.** Reflex needs two in dev (frontend 3000, backend 8000), which is
+why `make tunnel` has to tunnel both. In `--env prod` it mounts the compiled frontend
+onto the backend's own ASGI app, so a single 8000 serves the page *and* the `/_event`
+websocket. That collapses the two-tunnel problem into one Traefik router with no
+path-based split to get wrong.
+
+**`api_url` stays at `http://localhost:8000` in the image, on purpose.** The compiled
+bundle rewrites any `SAME_DOMAIN_HOSTNAMES` value — localhost, 0.0.0.0, :: — to whatever
+origin actually served the page, upgrading `http`→`https` and `ws`→`wss` and dropping the
+port. So the registry's "api_url is compiled INTO the bundle" fact still holds exactly as
+written; it just means the *correct* baked value for a reverse-proxied deployment is
+localhost, and the image carries no domain and needs no rebuild to move hosts.
+
+**Auth is a password gate in the app, not Traefik basicauth.** The thing being protected
+is the Gemini quota and Decathlon's MCP rate limiter — a lockout is ~48 minutes — not
+per-visitor data, so a shared password is the right shape and a username would be
+theatre. Traefik's basicauth was the cheaper build and was rejected: a browser credential
+dialog cannot be styled, and the URL has to be handable to a judge with nothing to
+explain but one password. The gate is enforced in Python inside every handler that spends
+a call, per the guardrail principle — `rx.cond` decides what renders, and renders nothing
+that isn't also refused server-side.
+
+`unlocked` defaults to a literal `False` rather than `not GATE_ON`. A state var's default
+is compiled into the bundle and the image is built with no password set, so the derived
+version baked in as `True` and served the unlocked app shell to any browser whose
+websocket never completed. Fail-closed is the only safe direction for a default that
+ships to the client.
+
+Rejected: building the frontend at container start. It would let one image serve any
+`api_url`, at the cost of bun plus 277 MB of `node_modules` in the runtime image and a
+multi-minute boot before the first request. The rewrite above makes it unnecessary.
+
+## The audit trail is copyable, and the copy button does not lie
+
+The panel renders `summarise()`, which clamps each payload value at 120 characters and
+the whole line at 300. That is right for something a judge reads over your shoulder while
+the agent works, and useless afterwards: debugging a failed run with an AI meant
+screenshotting a panel whose payloads were already truncated. One button in the audit
+header now puts the whole run on the clipboard — conversation, trace with **full**
+payloads, kit, budget and cart — as text that needs no explanation when pasted.
+
+**The full payloads live in a backend-only var.** `trace` crosses the websocket on every
+drain, so widening `TraceRow` would have made every run more expensive to watch in order
+to make a rare copy richer. `_raw_trace` (leading underscore → never serialized to any
+browser) mirrors it with the events intact. `_last_bundle` is the same trick: the
+rendered text stays server-side, and only a *refused* copy publishes it to the client so
+it can be selected by hand.
+
+**The confirmation reports what happened, not what was attempted.** `rx.set_clipboard`
+was rejected: it fires on the websocket response, one round trip after the click and
+outside its transient user activation, which Firefox and Safari refuse — and it returns
+no result, so the green tick would have appeared over a failed copy. `run_script` with a
+callback gets the promise's actual result back, and a blocked write renders the text for
+manual selection instead of a lie. Consistent with the guardrail principle: a check
+written in Python is a guarantee, a badge written in hope is not.
+
+**`gate.unlocked`, `gate.refused` and `session.priority` were emitted with no sink bound**
+and so had never reached `State.trace` at all — only the process-wide ring buffer. They
+now bind a sink like every other handler, which fixes the panel as well as the bundle.
+Reading `trace.recent()` instead was rejected outright: `_GLOBAL` is process-wide, and on
+the public URL it would splice other visitors' sessions into one user's bundle.
+
+**The cart's `continue_url` is not redacted**, deliberately. It resolves to a working
+`/cart/c/<token>?key=<key>`, which is frequently the thing being debugged; the cart
+carries no payment and the README already publishes such links. The bundle header says so
+rather than leaving it a surprise.
+
+Found only in a browser: Reflex returns state containers as `MutableProxy`, which
+`json.dumps` misses, so payloads first came out as Python reprs inside JSON strings.
+Handler tests asserting substrings all passed. `state.plain()` fixes it and
+`verify_ui.py` now asserts real JSON — the class of bug that only a real round trip
+exposes.
+## Backing off the storefront, and treating a rate limit as a pause — 28 Jul 2026
+
+A live turn died with `HTTPStatusError: 429` on `GET /collections.json?limit=250`. The
+trace read `profile.built` → `turn.error` → `turn.done stage=error`: `get_taxonomy()`
+called `raise_for_status()` with nothing around it, `_plan_slots` was the caller, and
+the generic handler in `run_turn` turned a rate limit into "Something broke."
+
+**The storefront's limiter is its own.** The registry's "storefront stays healthy
+through an MCP lockout" is still true and was left standing — this 429 arrived with no
+MCP lockout in play, which is a different fact.
+
+What we then measured, and it is worse than the incident suggested. The storefront sends
+`Retry-After: 60` on every 429, **and that hint is not honest**: httpx was still 429
+after 75 s of complete quiet. So the bucket is penalty-shaped rather than a rolling
+window, and neither 60 s nor MCP's 48 minutes is a recovery figure worth acting on.
+`catalog._get()` therefore backs off on a budget **we** chose — ≤4 attempts, ~12 s
+total, exponential with jitter — and never on a number Decathlon supplied. Because 60 s
+exceeds that budget, the live path is *one attempt then degrade*; the ladder only runs
+when no hint arrives. That is deliberate: 60 s inside `_tax_lock` is precisely the stall
+we refused, and a stalled turn is worse than a short kit.
+
+**Unexplained, and left unexplained on purpose.** From this machine and one IP,
+interleaved over ~45 minutes: `curl`, Python `urllib` and `requests`/`urllib3` all
+returned 200 while `httpx` returned 429 every time. The decisive reading is three
+requests inside two seconds — `06:44:34 httpx → 429`, `06:44:35 requests → 200` (228
+collections), `06:44:36 httpx → 429`. That rules out a volume bucket, a per-IP bucket
+and a time window in one shot, and `httpx` was still 429 after 25 minutes of total
+quiet. Ruled out at the application layer: User-Agent; `Accept`/`Accept-Encoding`/
+`Connection` values (curl sending httpx's exact header set got 200, httpx sending
+urllib's exact set got 429); **header order** (httpx sending requests' exact headers in
+requests' exact order still got 429); HTTP version; ALPN; address family. Whatever this
+is, it lives at TLS or below.
+
+**We did not move the storefront off httpx, and the reason is sharper than "we don't
+know why".** The tempting read is "httpx is fingerprinted, so use requests." The problem
+is that httpx is also *the only stack that has ever fired `_prefetch`'s ~24-request
+bursts from this machine* — curl, urllib and requests have only ever made single-shot
+probes here. "httpx is singled out" and "httpx is the one we burned" predict everything
+we observed, and separating them requires deliberately burning a second client, which
+spends the one known-good fallback we have. Under the second reading a swap buys one
+clean run and then re-earns the same state on the replacement, with the burst prevention
+dropped because the problem looks solved. It would also cost `logfire.instrument_httpx()`
+and split the two commerce surfaces onto different client idioms. Backoff, pacing and
+graceful degradation are the correct response under *both* readings; that is the
+tiebreaker.
+
+A stack swap therefore stands as a **demo-day contingency, untested under burst load** —
+`requests` is already in the venv and verifiably serves the feed — alongside
+`CONCIERGE_FIXTURE_MODE=1`. If it is ever taken, the pacing and backoff must travel with
+it. Probing was stopped deliberately: seven probes each eliminated a hypothesis without
+converging, and the next real step is a JA3/JA4 capture from a rested bucket, which is
+its own task.
+
+The budget is a **total**, not per-attempt, because `_tax_lock` is held across the whole
+sequence. Holding it is right — one queue against a limiter beats a thundering herd,
+and with one Granian worker every session waits on it — but that makes lock-held time
+equal to the retry budget, and the UI has no signal for a 30-second stall.
+
+**The latch decays here and does not in `ucp.py`.** Same shape, opposite lifetime, and
+the discriminator is request volume rather than confidence: `create_cart` is the only
+MCP call in a demo run, so `ucp.py`'s permanent latch costs 1.5 s, while `_prefetch`
+fires ~24 storefront requests every turn, where a permanent latch would charge every
+later turn ~36 s for one transient 429.
+
+**"Could not read" is not "not in stock."** The subtler half of the bug: `_prefetch`
+dropped a failed handle with `continue`, and `_retrieve` computed `empty = planned -
+stocked`, so a 429'd handle arrived at the model as "This collection is live but
+currently has no products in stock — say so, do not substitute." That is a fabricated
+inventory claim assembled from a request that never completed, which is the precise
+failure the guardrail principle exists to prevent. Unchecked now travels separately from
+empty through `_prefetch`, both retrieval and presentation prompts, and `_disclosures`.
+
+**A rate limit pauses the conversation instead of ending it.** `run_turn` reports
+`stage="rate_limited"`, keeps everything the turn earned on the session, and `_continue`
+re-enters at whichever stage did not finish rather than falling through to `_retrieve`
+with no slots and presenting an empty kit. The message quotes no wait time — we have no
+storefront figure worth standing behind, and MCP's is 48 minutes. On a resume turn the
+user's message is a retry, not an answer, so it is kept out of `session.answers`, where
+`_plan_slots` and `_select` would read it as a size.
+
+**The wait got its own loading state, driven off the trace.** A backoff is the one wait
+that reads as a hang: `_get` can hold a request for seconds while the spinner still says
+"Reading the conditions…", which is untrue and, on a demo, indistinguishable from a
+crash. `_drain` already walks every trace event into the UI mid-turn, so mapping the
+rate-limit events to a status there (`_THROTTLE_STATUS`) is what lets the message land
+*while the turn is still running* — a field on `TurnResult` would arrive only once the
+turn was over, which is exactly too late for a loading message. Two levels, because
+"still trying" and "gave up on that one and carried on" are different facts the user is
+entitled to, and neither quotes a number. It is warn-toned rather than merely reworded:
+the point is that a judge watching the screen can tell at a glance that we are waiting
+on Decathlon rather than broken. The coupling this creates — status keyed by event
+*name* — is pinned by a test and recorded in the maintenance contract, because a rename
+in `catalog.py` would otherwise strip the message with nothing failing.
+
+Rejected: escalating `ucp.py`'s spaced retry to 2–3 attempts while we were here. Nothing
+in the incident implicated MCP; 1.5 s is measured and 3 s / 6 s would have been invented;
+and `UcpRateLimited`'s documented meaning — "even a trickle was refused" — is depended on
+by `tools.py` and pinned by a test. Its mitigation is already the measured-correct one.
+
+## Correction: the storefront refuses reused connections — 28 Jul 2026
+
+The entry above concluded "do not swap the storefront off httpx" and left the cause
+open between a TLS-fingerprint bucket and a penalty box our own bursts earned. A
+deliberate experiment settled it, and then a second one overturned the conclusion we
+drew from the first. Both are recorded because the sequence is the point.
+
+**Experiment 1 — burn an expendable client.** The two hypotheses were indistinguishable
+by any test that did not involve bursting a second client, so we bursted the one we
+would never ship: stdlib `urllib`, 24 collection feeds at 6 concurrent, one turn's
+worth. It returned **24/24 at 9.3 req/s**, and immediately afterwards `requests`
+returned 200 while `httpx` returned 429 in the same second. The penalty-box hypothesis
+died there: a client that had just bursted was fine, a client idle for hours was
+refused. On that evidence the swap was approved and made.
+
+**Experiment 2 — the swap failed, which was the useful part.** `requests` behind a
+thread-local `Session` gave **17 of 24 feeds 429** on the first real turn. Adding rate
+spacing made it *worse* (4/24 at 6.4 req/s), while `urllib` re-ran clean at 9.3 req/s
+minutes later. Rate was therefore exonerated. The one remaining difference was
+connection reuse — `urllib` pools nothing, `Session` and `httpx` both do — and
+`requests` with **no** Session returned **24/24 at 11.4 req/s**. Faster unpooled and
+clean, slower pooled and refused. It is not rate and it is not the library.
+
+So `catalog.client()` returns the `requests` **module**, never a Session, and the TLS
+handshake per request is the price of the feed working at all — about 2 s across a
+whole turn, against two consecutive verification turns of 24/24 feeds and 92 products
+in 3.2 s each with zero 429s. `ucp.py` stays on `httpx`: the MCP endpoint is a separate
+limiter, verified working the same hour, and `create_cart` is the demo's proof.
+
+**What we got wrong, in order:** "recovery is unmeasured" (it was measurable), "a
+penalty box our own bursts earned" (disproved by experiment 1), "httpx is fingerprinted
+and singled out" (too narrow — every pooled client is refused), and "the storefront
+limits on rate" (disproved by 11.4 req/s clean). Each was the honest reading of the
+evidence then available. The registry carries only the surviving version, and lists the
+superseded ones by name so they are not rediscovered from git history.
+
+**Still open:** a single `httpx.get()` from rest is refused too, and that request has no
+connection to reuse. So reuse cannot be the whole mechanism. A JA3/JA4 capture would
+close it out; it is no longer on the critical path, because the fix is measured,
+reproducible, and does not depend on knowing why.
+
+Rejected again, and now on better grounds: `curl_cffi` or any browser-impersonation
+transport. Decathlon's `agents.md` explicitly permits the endpoints we read and asks
+only that we back off on 429 — which we do. The fix that worked is "open a fresh
+connection", not "look like a browser", and that distinction is worth keeping.
+
 ### 2026-07-29 · Ask for the size, and keep asking until it is given
 
 A live run went out with a US 7 boot for a 9.5 foot. The rate limit was the trigger,
@@ -206,12 +433,19 @@ skipped the question stage entirely, and `_choose_size(requested=None)` did what
 documented to do — took the first available variant. Nothing flagged it, because
 `size_substituted` is False when no size was ever asked for.
 
-Two changes, and the split matters. The state bug is fixed at the root: `profile` and
-`slots` are committed to the session together, so a failure in either leaves the session
-untouched and the next turn re-enters the question stage. That alone would have prevented
-this run. It is not enough on its own — the question stage can legitimately return an
-empty list, and the model is free to skip the size question — so the guarantee lives in
-`check_size_confirmation`, a new `KitItem.size_confirmed` flag set from
+Two changes, and the split matters — but only one of them landed here. The state bug is
+fixed at the root by the rate-limit entry above, which merged first: `_continue` now
+skips a stage only if that stage actually completed, so a 429 in `_plan_slots` leaves
+the session resumable and the next turn re-plans the slots **and** re-enters the question
+stage. This branch carried its own answer to the same root cause — committing `profile`
+and `slots` together — and it was dropped during the rebase rather than merged, because
+two fixes for one bug is one too many and the resumable form also spares a re-run of the
+research and profile calls.
+
+What this entry contributes is the half the root-cause fix does not provide. Re-entering
+the question stage is not enough on its own: the stage can legitimately return an empty
+list, and the model is free to skip the size question. So the guarantee lives in
+`check_size_confirmation`, driven by a new `KitItem.size_confirmed` flag set from
 `ResolvedVariant.requested_size`. Prompt-level asking is a suggestion; the flag is code.
 
 `size_confirmed` is deliberately distinct from `size_substituted`. Substituted means the

@@ -4,17 +4,28 @@ Two surfaces, two price representations (SPEC.md §3.3):
   * storefront feed  -> `price` is a decimal STRING in MAJOR units ("50.00")
   * MCP get_product  -> `price` is {"amount": 5000, "currency": "USD"}, MINOR units
 Never cache the catalog to disk — a local copy reads as mocked.
+
+THE STOREFRONT USES `requests` WITH NO CONNECTION REUSE, AND BOTH HALVES OF THAT
+ARE DELIBERATE (AGENTS.md). Measured 28 Jul 2026: decathlon.com's storefront
+refuses REUSED connections. Every pooled client is 429'd (httpx always, even idle
+and single-shot; `requests.Session` fails 20 of 24 feeds at 6.4 req/s) and every
+fresh-connection client is served (urllib 24/24 at 9.3 req/s, `requests` with no
+Session 24/24 at 11.4 req/s). Faster unpooled and clean, slower pooled and
+refused — so it is neither rate nor the library. `ucp.py` stays on httpx: the MCP
+endpoint is a different limiter and is unaffected, verified working the same hour.
+Do not "unify the clients" and do not "reuse a Session" without re-measuring.
 """
 
 from __future__ import annotations
 
 import asyncio
 import difflib
+import random
 import re
 import time
 from typing import Any
 
-import httpx
+import requests
 
 from concierge.commerce.ucp import CONTEXT, call_ucp
 from concierge.domain.guardrails import check_query_shape
@@ -28,7 +39,6 @@ from concierge.obs.trace import emit
 
 BASE = "https://www.decathlon.com"
 
-_client: httpx.AsyncClient | None = None
 _taxonomy: list[dict[str, str]] | None = None
 _tax_lock = asyncio.Lock()
 
@@ -49,6 +59,22 @@ class UnknownHandle(Exception):
         self.suggestions = suggestions
 
 
+class CatalogUnavailable(Exception):
+    """The storefront refused or failed a request that outlived its retry budget.
+
+    Distinct from an empty collection, and the distinction is load-bearing: an empty
+    collection is a fact about stock, this is the absence of one. Reporting it as
+    "nothing in stock" fabricates an inventory claim from a request that never
+    completed, which is exactly what the guardrail principle exists to prevent."""
+
+    def __init__(self, url: str, status: int | None = None, detail: str = "") -> None:
+        super().__init__(f"storefront unavailable ({detail or status}) for {url}")
+        self.url = url
+        self.status = status
+        self.detail = detail
+        self.rate_limited = status == 429
+
+
 class NoStockError(Exception):
     def __init__(self, product: CatalogProduct, grid: list[tuple[str, bool]]) -> None:
         super().__init__(f"no available variant for {product.title!r}")
@@ -56,27 +82,196 @@ class NoStockError(Exception):
         self.grid = grid
 
 
-def client() -> httpx.AsyncClient:
-    global _client
-    if _client is None or _client.is_closed:
-        _client = httpx.AsyncClient(timeout=httpx.Timeout(30.0), follow_redirects=True)
-    return _client
+REQUEST_TIMEOUT = 30.0
+
+
+def client() -> Any:
+    """The `requests` MODULE, deliberately — NOT a `requests.Session`.
+
+    A Session pools connections, and connection REUSE is what the storefront
+    refuses. Measured 28 Jul 2026, same 24-feed burst at 6 concurrent, minutes
+    apart:
+
+        urllib, fresh conn per request   24/24 OK   9.3 req/s
+        requests, NO Session             24/24 OK  11.4 req/s
+        requests, shared Session          4/24 OK   6.4 req/s   <- pooled
+        httpx (pools by design)           always 429
+
+    Faster unpooled and clean; slower pooled and refused — so it is neither rate
+    nor the library. `requests.get()` opens one connection, uses it once and closes
+    it, which is the only configuration measured clean under our real load.
+    **Do not "optimise" this into a Session.** The TLS handshake per request is
+    the price of the feed working at all, and it costs ~2 s across a whole turn."""
+    return requests
 
 
 async def aclose() -> None:
-    global _client
-    if _client is not None and not _client.is_closed:
-        await _client.aclose()
-    _client = None
+    """Nothing to close — no pooled connections are held, on purpose (see client()).
+    Kept because scripts/ and the tests call it as part of the module's contract."""
+    return None
+
+
+# ── storefront transport: bounded backoff, and a latch that decays ──────────
+#
+# The storefront has its own limiter, separate from MCP's: `collections.json`
+# returned 429 on 28 Jul 2026 with no MCP lockout in play. It advertises
+# `Retry-After: 60` and that hint is NOT honest — still 429 after 25 minutes of
+# quiet — so there is no recovery figure here worth acting on, and none of MCP's
+# numbers transfer either. The retry ladder stays even though `requests` is not
+# currently being limited: a limiter we are not tripping today is not a limiter
+# that has gone away, and Decathlon's agents.md asks agents to back off on 429.
+#
+# The shape of the response IS borrowed from the MCP surface, where it is
+# measured: bursts trip a limiter that a trickle survives. So a 429 serialises
+# the storefront and spaces it out. Unlike ucp.py the latch DECAYS, and that
+# difference is deliberate: create_cart is one call per demo, but _prefetch is
+# ~24 every turn, so a permanent latch would cost every later turn ~36 s for one
+# transient 429.
+SEM = asyncio.Semaphore(6)
+
+# A burst governor for the MULTI-SESSION case, not the fix for the 429 — rate was
+# tested and exonerated (11.4 req/s clean unpooled, 6.4 req/s refused pooled; see
+# client()). SEM bounds concurrency, which is not the same as bounding rate once
+# several browser sessions prefetch at once. Cheap insurance, and agents.md asks
+# for it: ~1.9 s across a whole turn.
+MIN_INTERVAL = 0.08  # ~12 req/s ceiling, at the rate that measured clean
+
+MAX_ATTEMPTS = 4
+RETRY_BUDGET_SECONDS = 12.0  # TOTAL per request, not per attempt: _tax_lock is held
+BACKOFF_BASE = 0.6           # across the whole sequence and every session waits on it
+BACKOFF_CAP = 4.0
+PACE_SECONDS = 1.5
+COOLDOWN_SECONDS = 60.0
+
+_paced_until = 0.0
+_pace_lock = asyncio.Lock()
+_last_send = 0.0
+
+_gap_lock = asyncio.Lock()
+_last_start = 0.0
+
+
+async def _space() -> None:
+    """Hold the floor only long enough to stamp the slot, so requests still overlap
+    up to SEM — this bounds the RATE, not the concurrency."""
+    global _last_start
+    async with _gap_lock:
+        wait = MIN_INTERVAL - (time.monotonic() - _last_start)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _last_start = time.monotonic()
+
+
+def _latch() -> None:
+    global _paced_until
+    _paced_until = time.monotonic() + COOLDOWN_SECONDS
+
+
+def _paced() -> bool:
+    return time.monotonic() < _paced_until
+
+
+async def _send(url: str) -> requests.Response:
+    """`requests` is synchronous and the whole app is not — this is the seam. SEM(6)
+    already bounds it, so the thread pool never grows past that."""
+    return await asyncio.to_thread(lambda: client().get(url, timeout=REQUEST_TIMEOUT))
+
+
+async def _fetch(url: str) -> requests.Response:
+    global _last_send
+    if not _paced():
+        async with SEM:
+            await _space()
+            return await _send(url)
+
+    async with _pace_lock:
+        wait = PACE_SECONDS - (time.monotonic() - _last_send)
+        if wait > 0:
+            await asyncio.sleep(wait)
+        try:
+            return await _send(url)
+        finally:
+            _last_send = time.monotonic()
+
+
+def _retry_after(value: str | None) -> float | None:
+    """Seconds form only. The HTTP-date form is left unparsed rather than guessed at;
+    an unreadable hint falls through to backoff, which is the safe direction."""
+    try:
+        return max(0.0, float((value or "").strip()))
+    except ValueError:
+        return None
+
+
+def _delay(attempt: int, hint: float | None, remaining: float) -> float | None:
+    """None means the budget cannot cover another wait — give up and degrade.
+
+    The storefront's measured hint is `Retry-After: 60` (28 Jul 2026), so one attempt
+    then degrade IS the live path here, not an edge case. 60 s is not absurd the way
+    MCP's 48 minutes is; it is simply longer than a turn can be made to wait, and
+    `_tax_lock` is held for every second of it. A stalled turn is worse than a short
+    kit. The exponential ladder below is what runs when no hint is sent at all."""
+    wait = min(BACKOFF_CAP, BACKOFF_BASE * 2**attempt)
+    wait *= 0.5 + random.random() / 2  # jitter, or a burst retries in lockstep
+    if hint is not None:
+        wait = max(wait, hint)
+    return None if wait > remaining else wait
+
+
+async def _get(url: str, what: str) -> Any:
+    deadline = time.monotonic() + RETRY_BUDGET_SECONDS
+    status: int | None = None
+    detail = ""
+
+    for attempt in range(MAX_ATTEMPTS):
+        hint: float | None = None
+        try:
+            r = await _fetch(url)
+        except requests.RequestException as exc:
+            status, detail = None, f"{type(exc).__name__}: {exc}"[:160]
+        else:
+            if r.status_code < 400:
+                return r.json()
+            status, detail = r.status_code, f"HTTP {r.status_code}"
+            if r.status_code == 429:
+                hint = _retry_after(r.headers.get("Retry-After"))
+                _latch()
+                emit(
+                    "catalog.rate_limited",
+                    {"what": what, "attempt": attempt + 1, "retry_after": r.headers.get("Retry-After")},
+                    "error",
+                )
+            elif r.status_code < 500:  # 404 and friends: retrying cannot help
+                break
+
+        wait = _delay(attempt, hint, deadline - time.monotonic())
+        if wait is None or attempt == MAX_ATTEMPTS - 1:
+            break
+        emit("catalog.retry", {"what": what, "attempt": attempt + 1, "in_s": round(wait, 2), "why": detail})
+        await asyncio.sleep(wait)
+
+    emit("catalog.unavailable", {"what": what, "status": status, "error": detail}, "error")
+    raise CatalogUnavailable(url, status, detail)
 
 
 async def get_taxonomy(force: bool = False) -> list[dict[str, str]]:
+    """The lock is held across the retries on purpose — one queue against a limiter
+    beats a thundering herd — which is what bounds RETRY_BUDGET_SECONDS.
+
+    A stale taxonomy is served rather than failing the turn: it is handles and titles,
+    which are stable, and it is already a process-lifetime cache. Availability is never
+    served from it."""
     global _taxonomy
     async with _tax_lock:
         if _taxonomy is None or force:
-            r = await client().get(f"{BASE}/collections.json?limit=250")
-            r.raise_for_status()
-            _taxonomy = [{"handle": c["handle"], "title": c["title"]} for c in r.json()["collections"]]
+            try:
+                data = await _get(f"{BASE}/collections.json?limit=250", "taxonomy")
+            except CatalogUnavailable:
+                if _taxonomy is None:
+                    raise
+                emit("catalog.taxonomy_stale", {"count": len(_taxonomy)}, "guardrail")
+                return _taxonomy
+            _taxonomy = [{"handle": c["handle"], "title": c["title"]} for c in data["collections"]]
             emit("catalog.taxonomy", {"count": len(_taxonomy)})
     return _taxonomy
 
@@ -142,11 +337,10 @@ async def get_collection(handle: str, limit: int = 12) -> list[CatalogProduct]:
     if invalid:
         raise UnknownHandle(handle, suggest_handles(handle, await get_taxonomy()))
 
-    r = await client().get(f"{BASE}/collections/{handle}/products.json?limit={limit}")
-    r.raise_for_status()
+    data = await _get(f"{BASE}/collections/{handle}/products.json?limit={limit}", f"collection:{handle}")
 
     products = []
-    for raw in r.json().get("products", []):
+    for raw in data.get("products", []):
         try:
             products.append(map_product(raw))
         except Exception as exc:  # one malformed product must not cost the whole slot

@@ -83,6 +83,15 @@ pattern matches the invoking shell's own command line and kills the caller.
       declarations, client-side history, call counters.
 - [x] **Guardrails lane.** `domain/guardrails.py` + 131 offline tests green.
 - [x] **UI lane.** Chat, product cards, kit summary, trace panel, cart confirm.
+- [x] **Password gate.** One shared password, no username, branded full-page lock.
+      Enforced server-side in every handler that spends a call, not by `rx.cond`.
+      `DECABOT_PASSWORD` unset = gate off, so local dev and `make walkthrough` are
+      untouched. `unlocked` defaults to a literal `False` because a state var's
+      default is compiled into the bundle — see `AGENTS.md`.
+- [x] **Hosted deployment.** `Dockerfile` (prod = one port), Ansible role `decabot`
+      in `vps-infrastructure`, live at **https://decabot.web.vespiridion.org** on
+      Traefik + Let's Encrypt. Websocket upgrade and a live Gemini turn both verified
+      through TLS from outside the box. See [`DEPLOY.md`](DEPLOY.md).
 - [x] **End-to-end, CLI.** Santurbán prompt → grounded research (3,000–4,290 m,
       sub-zero lows) → `ActivityProfile` → 8 slots → live products → sizes
       resolved → **real cart, 5 lines, $1,004.98**.
@@ -126,6 +135,71 @@ pattern matches the invoking shell's own command line and kills the caller.
       injection blocked with prices unmoved → **real cart, 12 lines**, `continue_url`
       confirmed 301-redirecting to `www.decathlon.com/cart/c/…`. Screenshots in
       `docs/images/`, embedded in the README.
+- [x] **One-click run bundle for AI debugging**, 28 Jul. A copy button in the audit-trail
+      header puts the whole run — conversation, trace with **full** payloads, kit, budget,
+      cart — on the clipboard as text (`concierge/obs/bundle.py`). Payloads live in the
+      backend-only `_raw_trace`, so the panel's wire cost is unchanged. Verified in a real
+      browser **on dev, fixture mode, gate off**: 8,490 characters pasted back with a
+      trusted `Ctrl+V`, 16 real JSON payloads and zero Python reprs; with
+      `navigator.clipboard` removed the badge turns red and the text renders for manual
+      selection instead of showing a false tick.
+      `gate.unlocked` / `gate.refused` / `session.priority` now bind a sink and reach the
+      panel too — they never had. Because a *refused* password now leaves a row in the
+      trace, the button is gated on `can_copy_run`, not on the row count, or a locked-out
+      visitor would get an enabled button that silently does nothing.
+- [x] **Shipped to `decabot.web.vespiridion.org` and verified there, 28 Jul.** Image
+      rebuilt and pushed OCI, role re-run (`ok=8 changed=2 failed=0`), `health-check.yml`
+      green (`ok=59 failed=0`), `/ping` 200, websocket `101` over `--http1.1`, and all
+      four new markers (`can_copy_run`, `copy_fallback`, the aria-label, the blocked-
+      clipboard warning) found in the **served** bundle. End-to-end on the live host: a
+      wrong password then the right one, then copy — pasted back with a trusted `Ctrl+V`
+      reading `mode=live  gate=on  lane=public`, both gate guardrails with a `+15.711s`
+      offset, zero Python reprs. **Cost nothing** — no Gemini call, no Decathlon request,
+      so no 429 exposure. The full-kit rendering was proven locally in fixture mode
+      instead, deliberately.
+- [x] **A storefront rate limit no longer kills the turn, 28 Jul.** It killed one: `429`
+      on `collections.json`, `get_taxonomy()`'s naked `raise_for_status()`,
+      `profile.built` straight to `turn.error`. Every storefront request now goes
+      through `catalog._get()`: ≤4 attempts, ~12 s **total** budget, jittered
+      exponential backoff, a decaying pace latch, and a `Retry-After` we cannot outwait
+      reported rather than slept. A stale taxonomy beats a dead turn; a handle we could
+      not read is **unchecked**, never reported as empty; and a rate limit is
+      `stage="rate_limited"` — a pause `_continue` resumes from, not a crash.
+      `ucp.py` is deliberately untouched: nothing in the incident implicated MCP and its
+      1.5 s spacing is the measured-correct mitigation. **The wait has its own loading
+      state** — `_drain` maps the rate-limit trace events to a warn-toned status while
+      the turn is still running, so a multi-second backoff reads as "Decathlon is
+      rate-limiting me" rather than as a hang. 21 offline tests (`TestStorefrontBackoff`,
+      `TestUncheckedIsNotEmpty`, `TestARateLimitIsAPauseNotADeadEnd`,
+      `TestTheUiSaysWhenItIsBeingRateLimited`); `make check` green at 233.
+      **This makes the failure survivable. It does not make the storefront work — see
+      KNOWN ISSUES.**
+- [x] **Three storefront contract tests fixed.** `test_collection_handles_resolve`,
+      `test_empty_collection_is_legal` and `test_feed_prices_are_major_unit_strings`
+      took `live` but subscripted the module-level `mcp` **fixture object** —
+      `TypeError: 'FixtureFunctionDefinition' object is not subscriptable` on any
+      `make verify`. They now take a new `storefront` fixture, which also **skips**
+      instead of erroring the whole module when the storefront 429s.
+
+## KNOWN ISSUES
+
+- [x] **RESOLVED 28 Jul — the storefront refuses REUSED connections.** It was blocking
+      the whole live path: `make dev` could not fetch the taxonomy. Measured with the
+      same 24-feed burst at 6 concurrent, minutes apart, one machine and one IP —
+      `urllib` (fresh conn/request) 24/24 at 9.3 req/s · `requests` **without** a
+      Session 24/24 at **11.4 req/s** · `requests` **with** a shared Session 4/24 at
+      6.4 req/s · `httpx` (pools by design) always 429. Faster unpooled and clean,
+      slower pooled and refused: **not a rate limit, not the library.**
+      `catalog.client()` now returns the `requests` **module**, never a Session, so
+      every request opens and closes its own connection. **Do not "optimise" that into
+      a Session — it does not speed the feed up, it stops it working**
+      (`test_the_storefront_never_reuses_a_connection`). `ucp.py` stays on `httpx`:
+      separate limiter, verified unaffected the same hour, and `create_cart` is the
+      demo's proof. Verified: two consecutive full turns, 24/24 feeds, 92 products,
+      3.2 s each, zero 429s. `requests` is now a direct dependency and
+      `logfire[httpx,requests]` instruments both clients.
+      **Still open:** a single idle `httpx.get()` is refused too, which reuse alone
+      does not explain — a JA3/JA4 capture would close it out, off the critical path.
 
 ## KNOWN ISSUES — both will show on camera
 

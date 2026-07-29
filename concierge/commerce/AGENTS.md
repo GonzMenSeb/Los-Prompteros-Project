@@ -71,6 +71,31 @@ The storefront feeds are a separate surface and stay healthy throughout — and 
 all.** `create_cart` is the only MCP call left in a demo run, so a lockout costs the
 cart link and nothing else.
 
+**The storefront has its own limiter.** `collections.json` returned 429 on 28 Jul 2026
+with no MCP lockout in play, and `get_taxonomy`'s naked `raise_for_status()` turned it
+into a dead turn. `_get()` now owns every storefront request: `SEM(6)`, ≤`MAX_ATTEMPTS`
+tries on 429/5xx/transport error, exponential backoff with jitter inside a
+**`RETRY_BUDGET_SECONDS` TOTAL** — total, because `_tax_lock` is held for the whole
+sequence and every session queues behind it. A `Retry-After` we cannot outwait is
+reported, never slept. 4xx other than 429 is not retried.
+
+**`Retry-After: 60` is what it sends, and it is NOT honest** — httpx was still 429 after
+75 s of total quiet, so the bucket is penalty-shaped rather than a rolling 60-second
+window. Since 60 s > the budget, the live path is **one attempt then degrade**; the
+backoff ladder only runs when no hint arrives. None of MCP's numbers apply. The 429
+response *shape* is borrowed from the measured MCP surface: serialise and space out.
+Unlike `ucp.py` the latch **decays** after `COOLDOWN_SECONDS`, because `_prefetch` is
+~24 calls every turn where `create_cart` is one per demo.
+
+**The storefront refuses REUSED connections (28 Jul).** Same 24-feed burst at 6
+concurrent, minutes apart: `urllib` 24/24 (9.3 req/s), `requests` with no Session
+24/24 (11.4 req/s), `requests` with a shared `Session` 4/24 (6.4 req/s), `httpx`
+always 429. Faster unpooled and clean, slower pooled and refused — not rate, not the
+library. So `client()` returns the `requests` **module** and every call opens and
+closes its own connection. **Do not turn it into a Session.** `ucp.py` stays on
+`httpx`: different limiter, verified unaffected. Residual unknown — a single idle
+`httpx.get()` is refused too, which reuse alone does not explain.
+
 ## Why resolution is feed-first
 
 The feed's numeric variant id **is** the MCP variant GID (verified in both fixtures:

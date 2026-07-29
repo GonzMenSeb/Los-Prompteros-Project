@@ -54,8 +54,8 @@ When the catalog cannot fill a slot, the agent says so rather than substituting.
 | UI | **Reflex 0.9.7** — pure Python, compiles to a React frontend + FastAPI backend |
 | Model | **`google-genai` 2.14.0**, model **`gemini-3.6-flash`** |
 | Environmental knowledge | Gemini built-in `google_search` tool, search-only phase |
-| Commerce client | Hand-rolled JSON-RPC over **`httpx`** |
-| Retrieval | Live Shopify collection feeds |
+| Commerce client | Hand-rolled JSON-RPC over **`httpx`** (MCP only) |
+| Retrieval | Live Shopify collection feeds over **`requests`, no connection reuse** (§3.2) |
 | Transaction | Decathlon UCP MCP endpoint |
 | Validation | **Pydantic v2** |
 | Conversation state | **Client-side `contents` history list** (verified working on `models.generate_content`) |
@@ -99,6 +99,11 @@ Every line below was executed against the live services. **These look like bugs 
 - **Never sleep for `Retry-After`** — 48 minutes. And **never poll to detect recovery:** a single call succeeds *throughout* the lockout, so a success proves only that the bucket holds one token. It is not a readiness signal.
 - Mid-lockout a **burst of 3–4 re-trips it instantly**, while a **trickle ~1.5 s apart is served normally.** Hence §4.1's paced mode.
 - The **storefront JSON endpoints are a separate surface** and stayed healthy throughout an induced MCP lockout. They do not carry cart-usable variant GIDs, so a lockout degrades size resolution to trickle speed rather than leaving the kit untouched.
+- **The storefront runs its own limiter, and that is a different fact from the one above.** Observed **28 Jul 2026**: `GET /collections.json?limit=250` → **429 with no MCP lockout in play**. The naked `raise_for_status()` behind `get_taxonomy()` turned it into a dead turn — `profile.built` straight to `turn.error`. Likeliest trigger: our own prefetch burst, 8 slots × 3 handles ≈ 24 requests.
+- **The storefront advertises `Retry-After: 60` and it is NOT honest** — measured 28 Jul: the header read `60` on every 429, and httpx was **still 429 after 75 s of complete quiet**. The bucket is penalty-shaped, not a rolling 60-second window. MCP's 48 minutes does not transfer either. §4.3's backoff is therefore a budget *we* chose, and because 60 s exceeds it the live path is **one attempt then degrade** — the ladder only runs when no hint is sent. The user-facing message quotes no wait time at all.
+- **The storefront refuses REUSED connections — that is the whole finding.** Measured 28 Jul 2026, same 24-feed burst at 6 concurrent, minutes apart, one machine and one IP: `urllib` (fresh conn/request) **24/24 at 9.3 req/s**; `requests` with no Session (fresh conn/request) **24/24 at 11.4 req/s**; `requests` with a shared `Session` (pooled) **4/24 at 6.4 req/s**; `httpx` (pools by design) **always 429**, even idle and single-shot. Faster unpooled and clean, slower pooled and refused — so it is neither a rate limit nor the library. §4.3's `client()` returns the `requests` **module**, never a Session, so every request opens and closes its own connection.
+- **`ucp.py` stays on `httpx`** — the MCP endpoint is a different limiter, verified unaffected the same hour. Two clients in `commerce/` is deliberate; `obs/trace.py` instruments both.
+- **Residual unknown:** a single `httpx.get()` from rest is refused too, which reuse alone cannot explain. The mechanism is open; the fix is measured and reproducible (two consecutive full turns: 24/24 feeds, 92 products, 3.2 s each, zero 429s). JA3/JA4 capture would close it out.
 
 ### 3.3 Catalog & retrieval
 
@@ -214,18 +219,47 @@ await call_ucp("search_catalog", {"catalog": {
 ```python
 BASE = "https://www.decathlon.com"
 
-async def get_taxonomy() -> list[dict]:
-    """Live collection list. Slim to handle+title before prompting."""
-    r = await client.get(f"{BASE}/collections.json?limit=250", timeout=30)
-    return [{"handle": c["handle"], "title": c["title"]}
-            for c in r.json()["collections"]]
+# THE storefront rule (§3.2): NEVER REUSE A CONNECTION. client() hands back the
+# `requests` MODULE, not a Session, so every request opens and closes its own.
+# Pooled clients are 429'd; unpooled ones are served, and faster. Do not "optimise"
+# this into a Session — it does not speed the feed up, it stops it working.
+def client() -> Any:
+    return requests            # module, NOT requests.Session()
+
+async def _send(url: str) -> requests.Response:
+    return await asyncio.to_thread(lambda: client().get(url, timeout=REQUEST_TIMEOUT))
+
+# The retry ladder below stays even though we are no longer being limited: a limiter
+# we are not tripping is not a limiter that is gone, and agents.md asks for backoff.
+SEM                   = asyncio.Semaphore(6)
+MIN_INTERVAL          = 0.08   # burst governor for concurrent SESSIONS, not the fix
+MAX_ATTEMPTS          = 4
+RETRY_BUDGET_SECONDS  = 12.0   # TOTAL per request — _tax_lock is held for all of it
+BACKOFF_BASE, BACKOFF_CAP = 0.6, 4.0   # exponential, with jitter
+PACE_SECONDS          = 1.5    # serialised spacing once latched
+COOLDOWN_SECONDS      = 60.0   # the latch DECAYS; ucp.py's does not
+
+class CatalogUnavailable(Exception):
+    """Refused or failed past the budget. NOT an empty collection."""
+
+async def _get(url: str, what: str) -> Any:
+    """429/5xx/transport -> retry with jittered backoff inside the budget.
+    Other 4xx -> no retry. Retry-After longer than the budget -> reported, never slept."""
+
+async def get_taxonomy(force: bool = False) -> list[dict]:
+    """Live collection list, slimmed to handle+title before prompting. On failure the
+    last good copy is served STALE rather than failing the turn — handles and titles
+    are stable and it is already a process-lifetime cache. Availability never is."""
 
 async def get_collection(handle: str, limit: int = 12) -> list[dict]:
     """Live products for one gear slot. Handle MUST be validated by the caller."""
-    r = await client.get(f"{BASE}/collections/{handle}/products.json?limit={limit}",
-                         timeout=30)
-    return r.json()["products"]
 ```
+
+A failed fetch marks the handle **unchecked**, which stays distinct from **empty** all
+the way to the customer (`_prefetch` → `RETRIEVE_PROMPT` → `PRESENT_PROMPT` →
+`_disclosures`). Merging them reports a live collection as sold out on the strength of
+a request that never completed. At turn level a rate limit is `stage="rate_limited"` —
+a pause that `_continue` resumes from, not a crash.
 
 **Field mapping — storefront feed → everything downstream.** Getting this wrong is the easiest way to break the cart:
 

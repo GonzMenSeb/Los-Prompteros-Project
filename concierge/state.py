@@ -13,8 +13,11 @@ Two things here are load-bearing and look like over-engineering:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +36,7 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 from concierge import walkthrough
 from concierge.domain.guardrails import check_size_confirmation
 from concierge.domain.models import CartResult, KitItem, minor_to_display
+from concierge.obs import bundle
 from concierge.obs.trace import TraceEvent, bind_sink, emit
 from concierge.ui import demo_data
 
@@ -42,6 +46,28 @@ FIXTURE_MODE = os.environ.get("CONCIERGE_FIXTURE_MODE", "0") not in ("0", "false
 
 _STEP_DELAY = 0.25
 _POLL_INTERVAL = 0.15
+
+# A backoff is the one wait the user must not read as the app hanging: catalog._get
+# can sit on a retry for seconds, and "Reading the conditions…" under a spinner is a
+# lie about what is happening. Driven off the trace rather than threaded back through
+# run_turn, because the trace is already drained into the UI mid-turn and this needs
+# to land WHILE the turn is still running.
+#
+# Two levels, both honest, and neither quotes a wait: still trying, and gave up on
+# that request and carried on. No storefront figure is worth standing behind — its
+# Retry-After says 60 s and does not honour it — and MCP's is ~48 minutes.
+_RETRYING = "Decathlon is rate-limiting me — easing off and trying again…"
+_DEGRADED = "Decathlon is still rate-limiting me — carrying on with what I could read…"
+
+_THROTTLE_STATUS = {
+    "catalog.rate_limited": _RETRYING,
+    "catalog.retry": _RETRYING,
+    "ucp.rate_limited": _RETRYING,
+    "catalog.unavailable": _DEGRADED,
+    "catalog.taxonomy_stale": _DEGRADED,
+    "ucp.rate_limited_paced": _DEGRADED,
+    "guardrail.collection_unchecked": _DEGRADED,
+}
 
 # Public-load protection, for when a QR code points a room full of phones at the same
 # tunnel the demo is running on.
@@ -57,6 +83,20 @@ VIP_TOKEN = os.environ.get("CONCIERGE_VIP_TOKEN", "")
 PUBLIC_SLOTS = max(1, int(os.environ.get("CONCIERGE_PUBLIC_SLOTS", "3")))
 
 _public_gate = asyncio.Semaphore(PUBLIC_SLOTS)
+
+# One shared password, no username: on a public URL what needs protecting is the Gemini
+# quota and Decathlon's rate limiter, not per-visitor data. UNSET MEANS NO GATE, which is
+# what leaves local dev, `make walkthrough` and the test suite untouched.
+GATE_PASSWORD = os.environ.get("DECABOT_PASSWORD", "")
+GATE_ON = bool(GATE_PASSWORD)
+# What a returning browser presents instead of retyping. Producing it requires the
+# password, so restoring `unlocked` from the cookie is a real server-side check rather
+# than trusting a client-set flag.
+_GATE_DIGEST = (
+    hashlib.sha256(b"decabot.gate.v1:" + GATE_PASSWORD.encode()).hexdigest() if GATE_ON else ""
+)
+# A shared short password's only real defence is making each guess cost something.
+_GATE_DELAY = 0.6
 
 _SESSIONS: dict[str, Any] = {}
 
@@ -133,6 +173,25 @@ def to_card(item: KitItem) -> KitCard:
     )
 
 
+def plain(value: Any) -> Any:
+    """Reflex hands back state containers wrapped in `MutableProxy` (a wrapt
+    ObjectProxy). `isinstance` sees through it; `json.dumps` does NOT — its encoder does
+    an exact type check, misses the proxy and falls through to `default=`, which turns
+    every payload into a Python repr inside a JSON string. Rebuild real containers first.
+    """
+    if isinstance(value, dict):
+        return {str(k): plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [plain(v) for v in value]
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        return str(value)
+    return str(value)
+
+
 def summarise(payload: dict[str, Any]) -> str:
     """Trace payloads come from four different lanes with arbitrary nesting.
     Flatten to one scalar line so the panel never has to walk an unknown shape."""
@@ -159,6 +218,19 @@ class State(rx.State):
     trace: list[TraceRow] = []
     show_trace: bool = True
 
+    # The panel renders `summarise()`, which clamps values at 120 chars and the line at
+    # 300. The debugging bundle needs the payloads whole, and `trace` crosses the wire on
+    # every drain — so the full events live in a BACKEND-ONLY var (leading underscore),
+    # which Reflex never serializes to any browser. `_last_bundle` is the same trick: a
+    # successful copy then costs nothing on the wire.
+    _raw_trace: list[dict[str, Any]] = []
+    _last_bundle: str = ""
+
+    # "" | "ok" | "failed". Set from what the clipboard write actually RETURNED — a green
+    # tick that fires on dispatch rather than on success is a claim, not evidence.
+    copy_status: str = ""
+    copy_fallback: str = ""
+
     cart_id: str = ""
     cart_url: str = ""
     cart_total_minor: int = 0
@@ -168,9 +240,34 @@ class State(rx.State):
     is_thinking: bool = False
     awaiting_confirmation: bool = False
     status: str = ""
+    # Styling only — `status` carries the words. Separate so the spinner can change
+    # character without the UI having to string-match the message.
+    throttled: bool = False
     error: str = ""
 
     is_vip: bool = False
+
+    # Every handler that spends a Gemini call or touches Decathlon re-checks this, as
+    # `GATE_ON and not self.unlocked`. Conditional rendering is not a guard — the events
+    # are callable over the wire whatever is on screen — exactly the reasoning behind
+    # `confirm_cart` above.
+    #
+    # The `GATE_ON and` half is not redundant. `scripts/verify_walkthrough.py` and
+    # `verify_ui.py` drive these handlers directly with no browser, so `on_page_load`
+    # never runs and never opens the gate: a bare `not self.unlocked` turned
+    # `make rehearse` into a silent no-op that asserted nothing.
+    #
+    # False unconditionally, NOT `not GATE_ON`. A state var's default is compiled INTO
+    # the frontend bundle, and the image is built without DECABOT_PASSWORD set, so
+    # `not GATE_ON` baked in as True: a browser that never completed the websocket
+    # handshake was served the unlocked app shell. `on_page_load` opens the gate when
+    # it is off, so the only thing this default decides is what an unhydrated page
+    # shows — and that has to be the lock.
+    unlocked: bool = False
+    gate_error: str = ""
+    gate_busy: bool = False
+    gate_reveal: bool = False
+    gate_key: str = rx.Cookie(name="decabot_gate", max_age=60 * 60 * 24 * 30, same_site="lax")
 
     walkthrough_phase: str = ""
     # How far the two-step script has got: 0 nothing run, 1 prewarmed, 2 finished.
@@ -270,6 +367,10 @@ class State(rx.State):
                     summary=summarise(ev.payload),
                 )
             )
+            self._raw_trace.append(ev.as_dict())
+            throttle = _THROTTLE_STATUS.get(ev.event)
+            if throttle is not None:
+                self.throttled, self.status = True, throttle
         sink.clear()
         return True
 
@@ -292,8 +393,126 @@ class State(rx.State):
         self.cart_line_count = cart.line_count
         self.cart_expires_at = cart.expires_at or ""
 
+    @rx.var
+    def gate_on(self) -> bool:
+        return GATE_ON
+
+    @rx.var
+    def can_copy_run(self) -> bool:
+        """Binding a sink in `unlock` means a REFUSED password now puts a row in the
+        trace — so a non-empty trace alone would enable the copy button for someone who
+        is still locked out, and `copy_run` would then refuse in silence."""
+        return bool(self.trace) and not (GATE_ON and not self.unlocked)
+
     def toggle_trace(self):
         self.show_trace = not self.show_trace
+
+    def _reset_copy(self) -> None:
+        self._last_bundle = ""
+        self.copy_status = ""
+        self.copy_fallback = ""
+
+    def _snapshot(self) -> bundle.RunSnapshot:
+        return bundle.RunSnapshot(
+            stamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            mode="fixture" if FIXTURE_MODE else "live",
+            gated=GATE_ON,
+            lane="reserved" if self.is_vip else "public",
+            messages=[
+                {"role": m.role, "content": m.content, "citations": [c.url for c in m.citations]}
+                for m in self.messages
+            ],
+            events=plain(self._raw_trace),
+            items=[
+                {
+                    "slot": i.slot,
+                    "product_title": i.product_title,
+                    "product_url": i.product_url,
+                    "variant_id": i.variant_id,
+                    "size_label": i.size_label,
+                    "quantity": i.quantity,
+                    "price_minor": i.price_minor,
+                    "size_substituted": i.size_substituted,
+                    "rationale": i.rationale,
+                }
+                for i in self.kit_items
+            ],
+            unservable=list(self.unservable_slots),
+            budget_minor=self.budget_minor,
+            cart={
+                "cart_id": self.cart_id,
+                "url": self.cart_url,
+                "total_minor": self.cart_total_minor,
+                "line_count": self.cart_line_count,
+                "expires_at": self.cart_expires_at,
+            }
+            if self.cart_url
+            else None,
+        )
+
+    @rx.event
+    def copy_run(self):
+        """Put the whole run on the clipboard as text.
+
+        `rx.set_clipboard` would fire on the websocket RESPONSE — one round trip after
+        the click, outside its transient user activation — which Firefox and Safari
+        refuse, and it reports nothing back either way. `run_script` with a callback is
+        the honest form: the compiled frontend awaits the promise and hands the result to
+        `copy_finished`.
+        """
+        if GATE_ON and not self.unlocked:
+            return
+        self.copy_fallback = ""
+        self._last_bundle = bundle.render(self._snapshot())
+        yield rx.run_script(
+            f"navigator.clipboard?.writeText({json.dumps(self._last_bundle)})"
+            f".then(() => true, () => false) ?? false",
+            callback=State.copy_finished,
+        )
+
+    @rx.event
+    def copy_finished(self, ok: bool):
+        """No gate re-check here, unlike every other handler — and that is deliberate.
+        This one spends nothing and reveals nothing: state is per session, and a locked
+        caller's `copy_run` returned before writing `_last_bundle`, so the worst a forged
+        call can do is echo this session's own empty string back to itself."""
+        self.copy_status = "ok" if ok else "failed"
+        # Only a refused write puts the text on the wire, and only so it can be selected
+        # by hand. A working copy never pays for it.
+        self.copy_fallback = "" if ok else self._last_bundle
+
+    def toggle_reveal(self):
+        self.gate_reveal = not self.gate_reveal
+
+    @rx.event
+    async def unlock(self, form_data: dict[str, Any]):
+        if not GATE_ON or self.unlocked or self.gate_busy:
+            return
+
+        self.gate_busy = True
+        self.gate_error = ""
+        yield
+
+        await asyncio.sleep(_GATE_DELAY)
+        # Bound so these two land in THIS session's trace. Without a sink they reach only
+        # the process-wide ring buffer, and the panel — and the copied bundle — would be
+        # missing a guardrail verdict that did fire.
+        sink: list[TraceEvent] = []
+        bind_sink(sink)
+        try:
+            if hmac.compare_digest((form_data.get("password") or "").strip(), GATE_PASSWORD):
+                self.unlocked = True
+                self.gate_key = _GATE_DIGEST
+                emit("gate.unlocked", {}, level="guardrail")
+            else:
+                self.gate_error = "That is not the password."
+                emit("gate.refused", {}, level="guardrail")
+            self._drain(sink)
+        finally:
+            bind_sink(None)
+
+        self.gate_busy = False
+        yield
 
     def clear(self):
         _reset_session(self.router.session.client_token)
@@ -302,10 +521,13 @@ class State(rx.State):
         self.unservable_slots = []
         self.budget_minor = None
         self.trace = []
+        self._raw_trace = []
+        self._reset_copy()
         self._reset_cart()
         self.is_thinking = False
         self.awaiting_confirmation = False
         self.status = ""
+        self.throttled = False
         self.error = ""
         self.draft = ""
         self.walkthrough_stage = 0
@@ -319,14 +541,18 @@ class State(rx.State):
     @rx.event
     async def send_message(self, form_data: dict[str, Any]):
         text = (form_data.get("message") or self.draft or "").strip()
-        if not text or self.is_thinking:
+        if not text or self.is_thinking or (GATE_ON and not self.unlocked):
             return
 
         self.draft = ""
         self.error = ""
+        # No timed reset: Reflex holds the session state lock for a handler's duration,
+        # so sleeping to clear a badge would serialize that session's other events.
+        self._reset_copy()
         self.messages.append(ChatMessage(role="user", content=text))
         self.is_thinking = True
         self.status = "Reading the conditions…"
+        self.throttled = False
         self.awaiting_confirmation = False
         # A new turn supersedes the previous cart. Leaving these set would keep
         # `has_cart` true and permanently hide the confirm button on turn two.
@@ -377,6 +603,7 @@ class State(rx.State):
             bind_sink(None)
             self.is_thinking = False
             self.status = ""
+            self.throttled = False
         yield
 
     async def _fixture_turn(self, sink: list[TraceEvent]):
@@ -455,10 +682,13 @@ class State(rx.State):
     async def confirm_cart(self):
         if not self.awaiting_confirmation or not self.kit_items or self.is_thinking:
             return
+        if GATE_ON and not self.unlocked:
+            return
 
         self.awaiting_confirmation = False
         self.is_thinking = True
         self.status = "Creating the cart at Decathlon…"
+        self.throttled = False
         self.error = ""
         yield
 
@@ -515,6 +745,7 @@ class State(rx.State):
             bind_sink(None)
             self.is_thinking = False
             self.status = ""
+            self.throttled = False
         yield
 
     @rx.event
@@ -532,10 +763,23 @@ class State(rx.State):
         `router.url.query_parameters` — `router.page` is deprecated in 0.9.x and slated
         for removal in 1.0.
         """
+        if not GATE_ON:
+            self.unlocked = True
+        elif not self.unlocked and hmac.compare_digest(self.gate_key, _GATE_DIGEST):
+            self.unlocked = True
+
         params = self.router.url.query_parameters
         if VIP_TOKEN and params.get("vip", "") == VIP_TOKEN:
             self.is_vip = True
-            emit("session.priority", {"vip": True}, level="guardrail")
+            # Same reasoning as `unlock`. Bound around this emit ONLY — `run_walkthrough`
+            # below binds its own sinks per turn.
+            sink: list[TraceEvent] = []
+            bind_sink(sink)
+            try:
+                emit("session.priority", {"vip": True}, level="guardrail")
+                self._drain(sink)
+            finally:
+                bind_sink(None)
 
         phase = params.get("walkthrough", "").strip().lower()
         if phase in ("prewarm", "onstage", "all") and not self.walkthrough_autostarted:
@@ -559,7 +803,7 @@ class State(rx.State):
         script and the prewarm start from a clean slate — "onstage" deliberately keeps
         the kit the prewarm built, because that kit IS the thing being probed.
         """
-        if self.is_thinking or self.walkthrough_phase:
+        if self.is_thinking or self.walkthrough_phase or (GATE_ON and not self.unlocked):
             return
 
         script = walkthrough.beats(phase or None)

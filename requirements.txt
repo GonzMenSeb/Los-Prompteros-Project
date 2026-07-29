@@ -1,8 +1,9 @@
 reflex==0.9.7
 google-genai==2.14.0
 httpx
+requests
 pydantic>=2
-logfire[httpx]
+logfire[httpx,requests]
 python-dotenv
 pytest
 pytest-asyncio
