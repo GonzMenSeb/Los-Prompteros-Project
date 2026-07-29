@@ -196,3 +196,32 @@ previous entry no longer applies: MIT asks nothing of anyone who deploys a fork.
 
 Leaving the AGPL entry above in place rather than deleting it, per the append-only rule.
 A later reader should be able to see that AGPL was considered and why it was dropped.
+
+### 2026-07-29 · Ask for the size, and keep asking until it is given
+
+A live run went out with a US 7 boot for a 9.5 foot. The rate limit was the trigger,
+not the fault. `_continue` assigned `session.profile` before `_plan_slots`, so a 429 on
+the taxonomy left the session half-built: the retry took the "user is answering" branch,
+skipped the question stage entirely, and `_choose_size(requested=None)` did what it is
+documented to do — took the first available variant. Nothing flagged it, because
+`size_substituted` is False when no size was ever asked for.
+
+Two changes, and the split matters. The state bug is fixed at the root: `profile` and
+`slots` are committed to the session together, so a failure in either leaves the session
+untouched and the next turn re-enters the question stage. That alone would have prevented
+this run. It is not enough on its own — the question stage can legitimately return an
+empty list, and the model is free to skip the size question — so the guarantee lives in
+`check_size_confirmation`, a new `KitItem.size_confirmed` flag set from
+`ResolvedVariant.requested_size`. Prompt-level asking is a suggestion; the flag is code.
+
+`size_confirmed` is deliberately distinct from `size_substituted`. Substituted means the
+size WAS given and was sold out — a different sentence, and one the customer has already
+half-expected. Unconfirmed means we guessed. Conflating them would have let this failure
+hide inside a disclosure that already existed.
+
+Simón's call on the flow: the cart is NOT blocked on unconfirmed sizes. The link goes out
+with the confirmed lines plus the guessed ones, and the ask is repeated after the link.
+The reasoning is that seeing the products is what makes the size question answerable, and
+a blocked button on a demo stage is worse than a wrong size on an editable cart. The cost
+is real and accepted: a customer who ignores both asks checks out in a guessed size.
+Revisit if that ever happens to someone who is not us.

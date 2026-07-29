@@ -28,7 +28,13 @@ from pydantic import BaseModel, Field, ValidationError
 
 from concierge.agent import prompts, tools
 from concierge.agent.classify import MODEL, classify, generate
-from concierge.domain.guardrails import check_budget, check_stock, check_substitution, scrub_prose
+from concierge.domain.guardrails import (
+    check_budget,
+    check_size_confirmation,
+    check_stock,
+    check_substitution,
+    scrub_prose,
+)
 from concierge.domain.models import (
     ActivityProfile,
     CatalogProduct,
@@ -505,6 +511,11 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
         else:
             requests = [None] * max(1, min(int(pick.quantity or party), party, 6))
 
+        # A per-person product offering more than one in-stock variant is a size the
+        # customer gets to choose. Anything else — a tent, a one-size item — is not
+        # something to pester them about.
+        sized = per_person.get(pick.slot, True) and len([v for v in product.variants if v.available]) > 1
+
         by_variant: dict[str, tuple[Any, int]] = {}
         for want in requests:
             resolved = await backend.resolve_variant(product, want)
@@ -533,6 +544,7 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
                     "quantity": qty,
                     "available": resolved.available,
                     "size_substituted": resolved.substituted,
+                    "size_confirmed": resolved.requested_size is not None or not sized,
                     "rationale": pick.rationale[:300],
                 }
                 for resolved, qty in by_variant.values()
@@ -567,7 +579,7 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
 
 def _disclosures(kit: Kit) -> str:
     """Emitted from data, not from the model, so they cannot be forgotten."""
-    lines = list(check_substitution(kit.items))
+    lines = list(check_substitution(kit.items)) + check_size_confirmation(kit.items)
     if kit.unservable_slots:
         lines.append("Not stocked right now: " + ", ".join(kit.unservable_slots) + ".")
     # An empty kit with a budget is the nothing-fits case, not a cheap one — the
@@ -689,8 +701,13 @@ async def _continue(session: ConversationSession, user_message: str, result: Tur
     if session.profile is None:
         session.trip_message = user_message
         session.research_text, session.citations = await _research(session, user_message)
-        session.profile = await _profile(session, user_message)
-        session.slots = await _plan_slots(session, user_message)
+        # Committed to the session TOGETHER, at the end. Assigning session.profile
+        # before _plan_slots meant a failure there (a 429 on the taxonomy, live on
+        # 29 Jul 2026) left a half-built session: the retry took the `else` branch,
+        # skipped the question stage entirely, and built a kit on guessed sizes.
+        profile = await _profile(session, user_message)
+        slots = await _plan_slots(session, user_message)
+        session.profile, session.slots = profile, slots
 
         result.profile, result.slots = session.profile, session.slots
         result.citations = session.citations

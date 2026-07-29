@@ -104,6 +104,10 @@ class KitItem(BaseModel):
     quantity: int = 1
     available: Literal[True]
     size_substituted: bool = False
+    # False means the size was NOT asked for — `_choose_size` fell through to
+    # "first available", which is how a 9.5 foot got a 7. Distinct from
+    # `size_substituted`, which is a size that WAS asked for and was sold out.
+    size_confirmed: bool = True
     rationale: str = ""
 
     @field_validator("variant_id")

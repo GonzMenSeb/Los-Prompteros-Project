@@ -10,7 +10,12 @@ import asyncio
 
 import pytest
 
-from concierge.domain.guardrails import check_budget, check_substitution, find_unbacked_claims
+from concierge.domain.guardrails import (
+    check_budget,
+    check_size_confirmation,
+    check_substitution,
+    find_unbacked_claims,
+)
 from concierge.domain.models import Kit
 from tests.conftest import VARIANT_GID, feed, item
 
@@ -503,7 +508,56 @@ class TestSelectionBuildsTheKit:
         assert item_.size_label.endswith("10.5")
         assert item_.available is True
         assert item_.price_minor > 0
+        assert item_.size_confirmed is True
         assert unservable == []
+
+    @pytest.mark.parametrize(
+        "per_person,expected",
+        # A wearable with no size given is the 29 Jul failure: first-available wins and
+        # nothing flags it. Shared kit has no size to ask for, so it must stay quiet.
+        [(True, False), (False, True)],
+    )
+    async def test_a_size_the_customer_never_gave_is_flagged_unconfirmed(
+        self, monkeypatch, per_person, expected
+    ):
+        loop = _mod("concierge.agent.loop")
+        catalog = _mod("concierge.commerce.catalog")
+        tools = _mod("concierge.agent.tools")
+        from concierge.domain.models import GearSlot
+        from tests.conftest import catalog as reference
+
+        products = {p.handle: p for p in reference("hiking-boots")}
+        handle = next(iter(products))
+        catalog._resolved_cache.clear()
+
+        selection = loop._Selection(picks=[loop._Pick(slot="boots", product_handle=handle, sizes=[])])
+
+        class _Response:
+            parsed = selection
+
+        async def fake_model(session, **kwargs):
+            return _Response()
+
+        monkeypatch.setattr(loop, "_model", fake_model)
+        tools.set_backend(catalog)
+
+        session = loop.ConversationSession(
+            slots=[
+                GearSlot(
+                    name="boots",
+                    rationale="peat bog",
+                    collection_handles=["hiking-boots"],
+                    per_person=per_person,
+                )
+            ],
+            catalog=dict(products),
+            slot_products={"boots": list(products)},
+        )
+        kit, _ = await loop._select(session)
+
+        assert len(kit.items) == 1
+        assert kit.items[0].size_confirmed is expected
+        assert bool(check_size_confirmation(kit.items)) is not expected
 
     async def test_an_unretrieved_handle_is_unservable_not_invented(self, monkeypatch):
         loop = _mod("concierge.agent.loop")
