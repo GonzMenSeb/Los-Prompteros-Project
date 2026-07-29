@@ -134,6 +134,16 @@ pattern matches the invoking shell's own command line and kills the caller.
       panel too — they never had. Because a *refused* password now leaves a row in the
       trace, the button is gated on `can_copy_run`, not on the row count, or a locked-out
       visitor would get an enabled button that silently does nothing.
+- [x] **Shipped to `decabot.web.vespiridion.org` and verified there, 28 Jul.** Image
+      rebuilt and pushed OCI, role re-run (`ok=8 changed=2 failed=0`), `health-check.yml`
+      green (`ok=59 failed=0`), `/ping` 200, websocket `101` over `--http1.1`, and all
+      four new markers (`can_copy_run`, `copy_fallback`, the aria-label, the blocked-
+      clipboard warning) found in the **served** bundle. End-to-end on the live host: a
+      wrong password then the right one, then copy — pasted back with a trusted `Ctrl+V`
+      reading `mode=live  gate=on  lane=public`, both gate guardrails with a `+15.711s`
+      offset, zero Python reprs. **Cost nothing** — no Gemini call, no Decathlon request,
+      so no 429 exposure. The full-kit rendering was proven locally in fixture mode
+      instead, deliberately.
 
 ## KNOWN ISSUES — both will show on camera
 
