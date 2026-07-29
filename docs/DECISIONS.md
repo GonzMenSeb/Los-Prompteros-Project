@@ -617,3 +617,45 @@ The detector's one finding — "Inter is an overused font" — remains the same
 adjudicated false positive it was on 25 Jul. Inter is the face Decathlon load, and
 it is the brand anchor's companion. No second face was added: the display register
 is Inter at 800 with `-0.04em`, which costs no extra font request on a projector.
+
+### 2026-07-29 · The fixture stops replaying a kit that ignores you
+
+Found by testing the demo the way a judge would: build the kit, take the cart link,
+then answer the size question DecaBot just asked. Nothing happened. Answering again
+produced a byte-identical turn — same trace, same kit, same guessed sizes.
+
+`_fixture_turn` took no `text` argument. It replayed `demo_trace()` and `demo_kit()`,
+both constants, then appended the same canned message. Meanwhile `confirm_cart`
+appends "Give me the sizes and I'll rebuild the kit and hand you a new link" after
+**both** the fixture and the live branch. So the one mode that runs on stage without
+Gemini quota was making a promise it structurally could not keep.
+
+**The live path was never broken.** `_continue` appends the message to
+`session.answers` (`loop.py`), and `answers` is threaded into `SELECT_PROMPT`, which
+produces `pick.sizes` for `resolve_variant`. The route to a second cart was not
+blocked either: `send_message` calls `_reset_cart()` on every turn, with a comment
+already anticipating exactly this failure. Only the fixture lied.
+
+The fix is not to soften the promise but to keep it. A follow-up naming a size now
+routes to `_fixture_resize` instead of replaying the opening turn, and `demo_kit()`
+takes the answers. **Nothing here fabricates stock:** the tokens resolve through the
+same `_kit_item` path and the same dumped availability grid as the first pass, so
+`XL` fits the fleece that stocks it, `9.5` matches nothing on an apparel line and is
+dropped, and a size nobody stocks leaves the line unconfirmed and says so. Answering
+"9.5 and XL" moves one line and reports the other as still guessed — which is the
+honest outcome, not a failure to handle.
+
+Recorded because it looks like a regression in the diff: **the fixture cart no longer
+reports the numbers in its own dump.** `fixtures/create_cart.json` is a real capture
+of a ONE-line $100 test cart, so rendering its totals printed
+"CART TOTAL $100.00 · LINES 1" directly beneath a $1,305.99 kit — and the visual work
+had just put that kit total at display scale, which made the contradiction louder.
+`demo_cart()` now derives the count and total from the kit that was actually
+confirmed. The id, the link and the expiry still come from the real capture, because
+that link being real is the point of it. The gap that leaves — a genuine link that
+opens one line — is stated in the cart block under fixture mode rather than left for
+a judge to discover on Decathlon's own page.
+
+Turn numbering in `turn.start` reads `turn=3` for the second exchange
+(`len(messages) // 2 + 1` counts an assistant message the fixture appends twice).
+Cosmetic, in the trace only, left alone.

@@ -1516,6 +1516,61 @@ class TestTheKitSaysWhoEachLineIsFor:
         owners = {n for i in kit.items if not i.size_confirmed for n in i.person_indexes}
         assert owners == {1, 2}, f"both people must be asked, got {owners}"
 
+    def test_the_fixture_answers_a_size_instead_of_replaying_the_guess(self):
+        """DecaBot promises "give me the sizes and I'll rebuild". In fixture mode that
+        promise used to be false — `_fixture_turn` took no text at all, so answering
+        returned a byte-identical kit however many times you tried."""
+        demo_data = _mod("concierge.ui.demo_data")
+
+        before = demo_data.demo_kit()
+        unconfirmed = [i for i in before.items if not i.size_confirmed]
+        assert unconfirmed, "the fixture must start with something to confirm"
+
+        # A size that IS stocked for one of the waiting lines.
+        target = unconfirmed[0]
+        product = next(
+            p
+            for p in demo_data.catalog("apparel-for-the-rain") + demo_data.catalog("hiking-fleeces-mid-layers")
+            if p.title == target.product_title
+        )
+        stocked = [
+            v.size_label.rsplit("/", 1)[-1].strip() for v in product.variants if v.available
+        ]
+        answer = next(s for s in stocked if s != target.size_label.rsplit("/", 1)[-1].strip())
+
+        after = demo_data.demo_kit(tuple(demo_data.sizes_in(f"my size is {answer}")))
+        moved = [
+            (b.size_label, a.size_label)
+            for b, a in zip(before.items, after.items)
+            if b.size_label != a.size_label
+        ]
+        assert moved, f"answering {answer!r} changed nothing"
+        assert sum(not i.size_confirmed for i in after.items) < len(unconfirmed), (
+            "answering a stocked size must reduce what is still being guessed"
+        )
+        # The substitution is a fact about stock and must survive a rebuild.
+        assert any(i.size_substituted for i in after.items), "the 7-in-boots substitution was lost"
+
+    def test_the_fixture_never_invents_a_size_that_is_not_stocked(self):
+        demo_data = _mod("concierge.ui.demo_data")
+        base = demo_data.demo_kit()
+        # XXL is not stocked anywhere in the dumped grid for the waiting lines.
+        after = demo_data.demo_kit(("XXL",))
+        assert [i.size_label for i in base.items] == [i.size_label for i in after.items]
+        assert [i.size_confirmed for i in base.items] == [i.size_confirmed for i in after.items]
+
+    def test_the_fixture_cart_agrees_with_the_kit_it_was_built_from(self):
+        """The dumped create_cart.json is a one-line $100 test cart. Reporting its
+        totals printed "CART TOTAL $100.00 · LINES 1" under a $1,305.99 kit."""
+        demo_data = _mod("concierge.ui.demo_data")
+        kit = demo_data.demo_kit()
+        cart = demo_data.demo_cart(kit.items)
+
+        assert cart.line_count == len(kit.items)
+        assert cart.total_minor == sum(i.price_minor * i.quantity for i in kit.items)
+        # The link itself is still the real capture — that is the point of it.
+        assert cart.continue_url.startswith("https://")
+
     def test_the_note_counts_what_it_is_asking_about(self):
         state_mod = _mod("concierge.state")
         state = state_mod.State(_reflex_internal_init=True)
