@@ -175,6 +175,19 @@ def confirm_bar() -> rx.Component:
     )
 
 
+def fixture_link_note() -> rx.Component:
+    # A module constant, not a Var — same reason as fixture_ribbon below.
+    if not FIXTURE_MODE:
+        return rx.fragment()
+    return rx.text(
+        "Replayed link — it opens a real captured cart of one line, not the lines above.",
+        size="1",
+        color=WARN_INK,
+        weight="medium",
+        line_height="1.55",
+    )
+
+
 def cart_block() -> rx.Component:
     return rx.cond(
         State.has_cart,
@@ -233,6 +246,10 @@ def cart_block() -> rx.Component:
                     State.cart_expires_at != "",
                     rx.text(f"Expires {State.cart_expires_at}", size="1", color=MUTED, font_family=MONO),
                 ),
+                # The totals above are this kit's. The LINK is a replayed capture of a
+                # one-line cart, and saying so here beats a judge clicking through and
+                # finding the mismatch on Decathlon's own page.
+                fixture_link_note(),
                 spacing="1",
                 align="start",
                 width="100%",

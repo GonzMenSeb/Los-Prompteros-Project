@@ -254,6 +254,62 @@ never readable — the fetch fails with *"served to you as a public (non-member)
 reader"* — and the restyle shipped from Decathlon's own scraped tokens instead, which
 is the stronger provenance anyway. Only revisit if the owner re-publishes it.
 
+## Open branches, for whoever orchestrates the merge
+
+Two stacked PRs, plus one docs-only branch that is not part of the stack. Merge order
+matters for the stack: **#5 first, then the fixture branch.**
+
+### PR #5 — `visual-direction-decabot-voice` → `ui-accessibility-and-size-affordance`
+
+The visual redesign from `docs/VISUAL-BRIEF.md`, all four work packages in one PR.
+Already merged the base branch into itself, so it is `MERGEABLE / CLEAN`.
+
+- **A** empty state: editorial hero at `4.25rem` / `-0.04em`, one primary example
+  path plus two secondary instead of three equal cards.
+- **B** kit: `kit_summary` is now the bill — total at display scale, counts as a
+  ledger, and every caveat that qualifies the total pulled inside the same object.
+  The slot kicker above each product title became a chip in the card's fact row.
+- **C** audit rail: dark instrument surface. A guardrail verdict is an OBJECT, a
+  routine step is a LINE. Rail contrast tokens are new and measured — see the table
+  in `DECISIONS.md`, 29 Jul, and re-measure before changing any of them.
+- **D** motion: one authored moment (the kit arriving). `db-rise` deleted.
+  `prefers-reduced-motion` gained a real alternative path instead of the blanket
+  `0.001ms` kill, verified by emulating the media feature.
+
+**What it does NOT touch:** `commerce/`, `agent/`, `domain/`, `rxconfig.py`. `state.py`
+is unchanged by it.
+
+**Watch for on review:** the person headings from the base branch (`_card_with_heading`,
+`grid-column: 1 / -1`) are direct children of the kit grid. The `.db-kit` motion
+selectors depend on that grid having exactly two children — a summary and the grid.
+Wrapping either in another element silently kills the one authored animation.
+
+**Deliberately left alone:** the `Person 1` heading is set in `_eyebrow` — versal caps
+with tracking. That reads like the kicker pattern §3.1 of the brief bans, but it is a
+group divider, not a label over a heading, and it arrived after the brief. Owner's call.
+
+### `fixture-tells-the-truth` → `visual-direction-decabot-voice`
+
+Found by testing the demo the way a judge would: build the kit, take the cart link,
+then answer the size question. Nothing happened, three times.
+
+Cause: `_fixture_turn` took no `text` argument at all. It replayed a constant trace
+and a constant kit on every turn, while `confirm_cart` promised "give me the sizes
+and I'll rebuild the kit and hand you a new link". **The live path was always fine** —
+`_continue` appends the answer to `session.answers`, which reaches `SELECT_PROMPT`.
+Only the fixture lied, and the fixture is what runs on stage without Gemini quota.
+
+### `demo-readiness-findings` — documentation only, not part of the stack
+
+`docs/DEMO-READINESS.md`: a review of where a first-time user breaks this, ordered by
+priority. Three P0s, all of them "the system knows something it does not tell the
+user": an exhausted Gemini quota prints a raw exception on the projector, the status
+line freezes for the whole first turn, and `my budget is 900` (no `$`) silently drops
+the budget along with the over-budget disclosure.
+
+Nothing in it is fixed. One new file, no code — it will not conflict with anything
+and can merge in any order.
+
 ## Traps that will cost you an hour if you "fix" them
 
 Full list in [`AGENTS.md`](../AGENTS.md). The five worst:
