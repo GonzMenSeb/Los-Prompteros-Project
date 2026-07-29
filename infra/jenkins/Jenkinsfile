@@ -36,6 +36,15 @@ pipeline {
                 script {
                     env.GIT_SHA = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
 
+                    // NOT `when { branch 'main' }`. That matches on BRANCH_NAME, which only
+                    // a multibranch job sets; in a cpsScm pipelineJob it is undefined, so the
+                    // condition silently never fires and the build goes green having deployed
+                    // nothing. Build #1 did exactly that. Compare refs instead.
+                    def head = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                    def mainRef = sh(returnStdout: true,
+                        script: 'git rev-parse --verify -q refs/remotes/origin/main || true').trim()
+                    env.ON_MAIN = (mainRef && head == mainRef) ? 'true' : 'false'
+
                     def base = env.GIT_PREVIOUS_SUCCESSFUL_COMMIT
                     def known = base && sh(returnStatus: true, script: "git cat-file -e ${base}^{commit}") == 0
                     def changed = known
@@ -62,7 +71,7 @@ pipeline {
                         env.RUN_IMAGE = 'true'
                     }
 
-                    echo "sha=${env.GIT_SHA}  tests=${env.RUN_TESTS}  image=${env.RUN_IMAGE}"
+                    echo "sha=${env.GIT_SHA}  onMain=${env.ON_MAIN}  tests=${env.RUN_TESTS}  image=${env.RUN_IMAGE}"
                     if (env.RUN_TESTS == 'false' && env.RUN_IMAGE == 'false') {
                         currentBuild.description = "${env.GIT_SHA} — docs only, nothing to do"
                     } else {
@@ -118,7 +127,7 @@ pipeline {
         stage('Build & Push') {
             when {
                 allOf {
-                    branch 'main'
+                    expression { env.ON_MAIN == 'true' }
                     expression { env.RUN_IMAGE == 'true' }
                 }
             }
@@ -155,7 +164,7 @@ pipeline {
         stage('Deploy') {
             when {
                 allOf {
-                    branch 'main'
+                    expression { env.ON_MAIN == 'true' }
                     expression { env.RUN_IMAGE == 'true' }
                 }
             }
@@ -186,7 +195,7 @@ pipeline {
         stage('Health') {
             when {
                 allOf {
-                    branch 'main'
+                    expression { env.ON_MAIN == 'true' }
                     expression { env.RUN_IMAGE == 'true' }
                 }
             }
