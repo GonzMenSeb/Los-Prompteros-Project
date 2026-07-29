@@ -83,6 +83,62 @@ Re-measured **25 Jul 2026**, and the numbers moved. `SPEC.md §3.2` and
   an MCP lockout. They carry the catalog and stock flags, but **not variant GIDs the
   cart accepts** — `resolve_variant` needs MCP `get_product`, so a lockout degrades
   the kit to trickle speed rather than leaving it untouched.
+- **The storefront has its own limiter, and it is not MCP's.** Observed **28 Jul
+  2026**: `GET /collections.json?limit=250` returned **429 with no MCP lockout in
+  play**, and it killed the turn — `get_taxonomy` called `raise_for_status()` naked,
+  so `profile.built` was followed straight by `turn.error`.
+- **When the storefront does 429 it says `Retry-After: 60`, and that 60 is not a
+  recovery time.** Measured 28 Jul: a pooled client kept getting 429 with that same
+  header after 75 s — and after 25 minutes — of complete quiet. Never sleep it and
+  never treat it as a countdown. `catalog._get` backs off on a budget we chose
+  instead — ≤`MAX_ATTEMPTS`, `RETRY_BUDGET_SECONDS` **total** per request,
+  exponential with jitter — and a hint longer than that budget is **reported, never
+  slept**, which at 60 s means one attempt then degrade. The ladder runs only when no
+  hint is sent. **All of this is now the unhappy path, not the normal one** (see the
+  connection-reuse entry below): unpooled, we are not being limited at all.
+- **It is a rate limiter, NOT a block, and we are inside Decathlon's stated rules.**
+  The 429 body is the 18-byte `text/plain` string **`local_rate_limited`**, with
+  `Retry-After: 60` and **no `cf-mitigated` header** — no challenge, no 403, no WAF
+  page. Their own `/agents.md` explicitly lists `GET /collections/{handle}/products.json`
+  under "Read-Only Browsing (No Authentication Required)" and instructs agents to
+  *"Respect rate limits… Back off on 429 responses"*, which is exactly what
+  `catalog._get` now does. `robots.txt` is `User-agent: * / Allow: /`; its only
+  `Disallow`s are faceted-navigation patterns (`sort_by`, `filter`, `+`) that we never
+  request. **Nobody is banning us — do not go looking for a way around a block, there
+  isn't one to route around.** Note their agents.md scopes its per-IP claim to the
+  *MCP* endpoint; the storefront limiter is undocumented, which matches it not being
+  IP-keyed here.
+- **THE STOREFRONT REFUSES REUSED CONNECTIONS. This is the whole finding.**
+  Measured 28 Jul 2026, the same 24-feed burst at 6 concurrent, minutes apart from
+  one machine and one IP:
+
+  | client | connections | result |
+  |---|---|---|
+  | `urllib` | fresh per request | **24/24 OK**, 9.3 req/s |
+  | `requests`, no Session | fresh per request | **24/24 OK**, 11.4 req/s |
+  | `requests`, shared `Session` | pooled keep-alive | **4/24 OK**, 6.4 req/s |
+  | `httpx` (pools by design) | pooled | **always 429**, even idle and single-shot |
+
+  It is **faster unpooled and clean, slower pooled and refused** — so it is neither
+  a rate limit nor the HTTP library. Two consecutive full turns through
+  `requests`-with-no-Session: 24/24 feeds, 92 products, 3.2 s each, zero 429s.
+  **`catalog.client()` therefore returns the `requests` MODULE, not a Session, and
+  `_send` opens one connection per request.** The TLS handshake per request is what
+  makes the feed work at all; it costs ~2 s across a whole turn. Do not "optimise"
+  it into a Session — that does not speed the feed up, it stops it working.
+- **`ucp.py` stays on `httpx`.** The MCP endpoint is a separate limiter and is
+  unaffected — `get_product` verified working the same hour the storefront was
+  refusing every pooled request. Two clients in `commerce/` is deliberate, and
+  `trace.py` instruments both.
+- **Residual unknown:** a single `httpx.get()` from a rested state is refused too,
+  which connection *reuse* alone does not explain — that request has nothing to
+  reuse. So the mechanism is not fully nailed; what is nailed, and reproducible, is
+  the fix. A JA3/JA4 capture is still the way to close it out, and it is no longer
+  on the critical path.
+- **Earlier readings of this that are now SUPERSEDED** — do not resurrect them from
+  git history: "recovery is unmeasured", "a penalty box our own bursts earned",
+  "httpx is fingerprinted and singled out", and the storefront limiting on rate.
+  Each was consistent with the evidence available at the time and each is wrong.
 
 ### Catalog & retrieval  (`concierge/commerce/catalog.py`)
 
@@ -178,6 +234,62 @@ Re-measured **25 Jul 2026**, and the numbers moved. `SPEC.md §3.2` and
   **Pin the ports**, or Reflex's "next available port if taken" behaviour silently
   moves the frontend and desyncs the tunnel.
 - `cors_allowed_origins` defaults to `("*",)`, so CORS needs no work.
+- **`rx.set_clipboard` fires on the websocket RESPONSE — outside the click's user
+  activation — and reports nothing back.** Chromium usually allows it because it
+  auto-grants `clipboard-write` to the focused tab; Firefox and Safari raise
+  `NotAllowedError`, and either way there is no success signal, so a "Copied ✓" badge
+  driven by it is a claim rather than evidence. `copy_run` therefore uses
+  `rx.run_script(js, callback=State.copy_finished)`: the compiled frontend **awaits the
+  promise** before invoking the callback (`.web/utils/state.js`), so the badge reports
+  what the write actually returned. **Do not "simplify" this back to `set_clipboard`** —
+  it silently reintroduces a green tick over a failed copy.
+- **Reflex hands state containers back wrapped in `MutableProxy` (a `wrapt.ObjectProxy`),
+  and `json.dumps` does not see through it.** `isinstance(proxy, dict)` is True, but the
+  encoder's exact type check misses the proxy and falls through to `default=`, so every
+  payload serialises as a **Python repr inside a JSON string** — `"{'turn': 1}"` instead
+  of `{"turn": 1}`. `state.plain()` rebuilds real containers before anything is dumped.
+  This is invisible to handler tests that only assert substrings, and was caught only by
+  pasting a real bundle out of a browser.
+
+### Container deployment  (`Dockerfile`, hosted at `decabot.web.vespiridion.org`)
+
+Executed against the live host on **28 Jul 2026**. The Reflex/serving entries above
+describe `reflex run` in DEV and remain correct there — **everything here is about
+`--env prod`, where the port and `api_url` rules genuinely differ.** Neither section
+overrides the other; check which mode you are in first.
+
+- **PROD IS ONE PORT.** `_run` errors with *"In production, frontend and backend must run
+  on the same port"* if they differ, and `_run_prod` mounts the compiled frontend onto the
+  backend's own ASGI app. So `8000` serves the page **and** `/_event`. The
+  "Reflex needs two ports … both must be publicly tunnelled" entry above is a **dev/tunnel**
+  fact. `--single-port` exists as a CLI flag and is **never forwarded to `_run`** — it is a
+  no-op in 0.9.7; prod is already single-port.
+- **`api_url` must stay `http://localhost:8000` in the image.** `state.js`
+  `getBackendURL()` rewrites any `SAME_DOMAIN_HOSTNAMES` host — `localhost`, `0.0.0.0`,
+  `::` — to `window.location.hostname`, upgrades `ws:`→`wss:` and **clears the port** when
+  the page is https. Baking the real hostname in would need one image per domain and buys
+  nothing. **This is why the image is domain-agnostic. Do not "fix" it to the public URL.**
+- **`REFLEX_SKIP_COMPILE` and `REFLEX_MOUNT_FRONTEND_COMPILED_APP` are declared
+  `internal=True`, which prefixes the real env var with `__`.** `__REFLEX_SKIP_COMPILE`,
+  `__REFLEX_MOUNT_FRONTEND_COMPILED_APP`. Without the underscores they are silently ignored.
+- **`.web/backend/stateful_pages.json` must be copied into the runtime image.**
+  `compile_app()` takes a no-write fast path only when that marker already exists;
+  otherwise a skip-compile boot still tries to *create* `.web/backend` and dies with
+  `PermissionError` as the non-root user. `[]` is the correct content for this app.
+- Static frontend lives at **`.web/build/client`** (`Dirs.STATIC = build/client`).
+- **Granian, not uvicorn.** Reflex ships granian and no uvicorn/gunicorn, so
+  `should_use_granian()` is what its own prod path takes. `get_num_workers()` returns
+  **1** without Redis — which is what keeps `_SESSIONS` and the `_public_gate` semaphore
+  (both process-local) correct. **Do not add Redis or raise the worker count** without
+  moving those out of module scope.
+- `state_manager_mode` is **DISK**, so `./.states` must be writable by the container user.
+- **Zot rejects Docker v2 manifests with `415`.** It accepts OCI only, so a plain
+  `docker push` fails at the manifest step with `manifest invalid` *after* every layer
+  uploads successfully. Push with
+  `docker buildx build --provenance=false --sbom=false --output type=image,oci-mediatypes=true,push=true`.
+- **A WebSocket probe must force `--http1.1`.** Traefik negotiates h2 with curl, and
+  `Connection: Upgrade` is an HTTP/1.1 mechanism, so over h2 granian answers
+  `400 Invalid websocket upgrade` on a completely healthy app.
 
 ## Module boundaries — enforced socially, and worth it
 
@@ -222,10 +334,12 @@ reasoning.
 |---|---|
 | `commerce/ucp.py` | this facts registry + `tests/test_contracts.py` |
 | any tool schema | `agent/tools.py`, the system prompt, and the trace event names |
+| a rate-limit trace event NAME | `state.py`'s `_THROTTLE_STATUS` — the throttled loading message is keyed by event string, so a rename silently strips it. Pinned by `test_it_keys_on_events_that_are_actually_emitted`. |
 | a guardrail | the guardrail table + its test + the trace event |
 | `rxconfig.py` | recompile the frontend; note the new URL in `docs/RUNBOOK.md` |
 | the build's state | tick it off in `docs/HANDOFF.md` — another agent resumes from there |
 | an architectural choice | append to `docs/DECISIONS.md` — never edit a past entry |
+| `Dockerfile` or anything the container reads | rebuild, re-push, redeploy per `docs/DEPLOY.md` |
 
 **PR checklist:** facts registry still accurate · `make check` green · `make verify`
 green if `commerce/` changed · `DECISIONS.md` appended if architectural.
@@ -236,6 +350,7 @@ green if `commerce/` changed · `DECISIONS.md` appended if architectural.
 |---|---|
 | [`SPEC.md`](SPEC.md) | Full technical specification. Cited by section number throughout the code. |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Demo-day sequence and contingencies. |
+| [`docs/DEPLOY.md`](docs/DEPLOY.md) | The hosted instance: how to ship a change, rotate the password, verify. |
 | [`docs/HANDOFF.md`](docs/HANDOFF.md) | State of the build — resume from this file alone. |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Append-only architectural log. |
 | [`docs/research/`](docs/research/) | **Archived pre-build research. Outranked by this file.** |

@@ -198,24 +198,43 @@ def bubble(m: ChatMessage) -> rx.Component:
     return rx.cond(m.role == "user", _user_bubble(m), _bot_bubble(m))
 
 
+def _waiting(accent: str, background: str, border: str, note: str = "") -> rx.Component:
+    # WARN is #FFCD4E — it carries the rule and the wash; the words stay on TEXT/MUTED,
+    # which is the only way it passes contrast.
+    lines = [rx.text(State.status, size="2", color=TEXT, weight="medium")]
+    if note:
+        lines.append(rx.text(note, size="1", color=MUTED))
+    return rx.hstack(
+        rx.spinner(size="2", color=accent),
+        rx.vstack(*lines, spacing="1", align="start"),
+        # A turn runs for a minute or more and `status` changes several times
+        # inside it. Without a live region that whole minute is silent.
+        role="status",
+        aria_live="polite",
+        spacing="3",
+        align="center",
+        padding="0.85rem 1.15rem",
+        border_radius=RADIUS,
+        background=background,
+        border=f"1px solid {border}",
+        border_left=f"3px solid {accent}",
+        box_shadow=SHADOW_SM,
+        width="100%",
+    )
+
+
 def thinking() -> rx.Component:
+    """The throttled variant exists because a backoff is a wait the user must not read
+    as a hang: `catalog._get` can sit on a retry for seconds, and a spinner still
+    saying "Reading the conditions…" is a lie about what the app is doing. It also
+    promises nothing — no countdown — because neither Decathlon surface gives us a
+    wait time worth quoting (AGENTS.md, rate limits)."""
     return rx.cond(
         State.is_thinking,
-        rx.hstack(
-            rx.spinner(size="2", color=BRAND),
-            rx.text(State.status, size="2", color=TEXT, weight="medium"),
-            # A turn runs for a minute or more and `status` changes several times
-            # inside it. Without a live region that whole minute is silent.
-            role="status",
-            aria_live="polite",
-            spacing="3",
-            align="center",
-            padding="0.85rem 1.15rem",
-            border_radius=RADIUS,
-            background=WHITE,
-            border=f"1px solid {TINT_3}",
-            box_shadow=SHADOW_SM,
-            width="100%",
+        rx.cond(
+            State.throttled,
+            _waiting(WARN, WARN_BG, WARN, "Still working — this just takes longer."),
+            _waiting(BRAND, WHITE, TINT_3),
         ),
     )
 
@@ -225,6 +244,7 @@ def composer() -> rx.Component:
         rx.hstack(
             rx.input(
                 name="message",
+                id="db-composer",
                 placeholder="Describe the trip — where, who with, how long…",
                 size="3",
                 width="100%",

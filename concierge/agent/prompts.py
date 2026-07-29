@@ -178,6 +178,10 @@ available to you; do NOT fetch them again.
 COLLECTIONS THAT CAME BACK EMPTY — live but carrying nothing right now.
 {empty}
 
+COLLECTIONS WE COULD NOT READ — Decathlon rate-limited or dropped the request. \
+We do NOT know what these carry.
+{unchecked}
+
 RULES
   * Only work on slots with NO products yet. If every slot is covered, call \
 nothing and reply "done".
@@ -186,6 +190,8 @@ tried, then get_collection_products on it. You may batch several calls per turn.
   * A collection listed as empty above stays empty. Do not retry it and do not \
 substitute a product from an unrelated category — an unfilled slot is the correct \
 outcome and you will say so later.
+  * A collection we could not read is NOT empty. You may spend one call retrying \
+one of them if a slot depends on it, but never claim it carries nothing.
   * Use search_products only when no collection fits, with a 1-3 word noun phrase.
   * Hard limit: {max_calls} tool calls. Then stop and reply with one line naming \
 the slots still unfilled. Do not write the customer-facing message yet."""
@@ -238,8 +244,12 @@ CONDITIONS FOUND
 THE KIT (these are the real retrieved products — the only ones that exist)
 {kit}
 
-SLOTS THAT COULD NOT BE FILLED
+SLOTS THAT COULD NOT BE FILLED — the catalog does not stock these
 {unservable}
+
+SLOTS WE COULD NOT CHECK — Decathlon rate-limited us. These may well be in stock; \
+we simply do not know.
+{unchecked}
 
 RULES
   * 120-180 words. Open with the two or three conditions that drove the kit.
@@ -248,6 +258,8 @@ message. Do not repeat every product title either.
   * State NO specification that is not in a product title. No temperature \
 ratings, capacities, weights, membranes or materials you were not given.
   * Name every unfilled slot plainly and say the catalog does not stock it.
+  * For a slot we could not check, say exactly that — Decathlon rate-limited the \
+lookup and asking again should clear it. Never call it out of stock.
   * Close by saying they can adjust anything, and that the cart is only created \
 when they confirm."""
 

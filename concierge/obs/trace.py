@@ -29,7 +29,13 @@ try:  # pragma: no cover - environment dependent
     import logfire
 
     logfire.configure(send_to_logfire="if-token-present", console=False)
+    # Two clients, two instrumentations: ucp.py is httpx, catalog.py's storefront is
+    # requests (commerce/catalog.py docstring). Instrumenting only one loses a surface.
     logfire.instrument_httpx()  # needs the logfire[httpx] extra
+    try:
+        logfire.instrument_requests()  # needs logfire[requests]
+    except Exception:  # pragma: no cover - extra may be absent
+        pass
 except Exception:  # pragma: no cover
     logfire = None
 

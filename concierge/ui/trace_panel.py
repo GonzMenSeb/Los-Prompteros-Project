@@ -47,6 +47,7 @@ from concierge.ui.theme import (  # noqa: F401
     RAIL_INK,
     RAIL_LINE,
     RAIL_MUTED,
+    RAIL_SUCCESS,
     RAIL_W,
     SHADOW_BRAND,
     SHADOW_LG,
@@ -218,6 +219,87 @@ def trace_body() -> rx.Component:
     )
 
 
+def copy_button() -> rx.Component:
+    """Copies the whole run — conversation, full payloads, kit, cart — for pasting into
+    an AI. The icon reports what the clipboard write RETURNED, not that one was sent."""
+    return rx.tooltip(
+        rx.button(
+            rx.match(
+                State.copy_status,
+                ("ok", rx.icon("check", size=15)),
+                ("failed", rx.icon("circle-alert", size=15)),
+                rx.icon("copy", size=15),
+            ),
+            on_click=State.copy_run,
+            variant="ghost",
+            size="1",
+            cursor="pointer",
+            # Rail tokens, not the light ones this shipped with: on the dark panel
+            # MUTED is 3.5:1, SUCCESS 3.74:1 and DANGER 3.24:1 — all under AA.
+            color=rx.match(
+                State.copy_status,
+                ("ok", RAIL_SUCCESS),
+                ("failed", RAIL_DANGER),
+                RAIL_MUTED,
+            ),
+            disabled=~State.can_copy_run,
+            aria_label="Copy this run as text for debugging",
+            _hover={"background": RAIL_BG_2, "color": RAIL_INK},
+        ),
+        content=rx.match(
+            State.copy_status,
+            ("ok", "Copied — paste it into an AI"),
+            ("failed", "Your browser blocked the clipboard"),
+            "Copy this run for debugging",
+        ),
+    )
+
+
+def copy_fallback() -> rx.Component:
+    """Only reachable when the clipboard write was refused — an insecure context, or a
+    browser that will not write outside a user gesture. The text is on the wire only in
+    this case, and only so it can be selected by hand."""
+    return rx.cond(
+        State.copy_status == "failed",
+        rx.vstack(
+            rx.hstack(
+                rx.icon("circle-alert", size=14, color=RAIL_DANGER, flex_shrink="0"),
+                rx.text(
+                    "Your browser blocked the clipboard. Select this and copy it by hand.",
+                    size="1",
+                    color=RAIL_DANGER,
+                    line_height="1.5",
+                ),
+                spacing="2",
+                align="center",
+                width="100%",
+            ),
+            # A white textarea on the dark rail was a hole punched through the panel.
+            rx.text_area(
+                value=State.copy_fallback,
+                read_only=True,
+                rows="8",
+                width="100%",
+                font_family=MONO,
+                font_size="0.7rem",
+                background=RAIL_BG_2,
+                color=RAIL_INK,
+                border=f"1px solid {RAIL_LINE}",
+                border_radius=RADIUS_SM,
+                on_click=rx.set_focus("db-copy-fallback"),
+                id="db-copy-fallback",
+            ),
+            spacing="2",
+            width="100%",
+            padding="0.6rem",
+            margin_bottom="0.6rem",
+            background="rgba(255,139,150,0.12)",
+            border="1px solid rgba(255,139,150,0.34)",
+            border_radius=RADIUS_SM,
+        ),
+    )
+
+
 def trace_header() -> rx.Component:
     return rx.hstack(
         rx.icon("activity", size=16, color=RAIL_GUARDRAIL),
@@ -234,6 +316,7 @@ def trace_header() -> rx.Component:
         ),
         rx.spacer(),
         rx.cond(State.is_thinking, rx.spinner(size="1", color=RAIL_GUARDRAIL)),
+        copy_button(),
         rx.button(
             rx.icon("chevron-right", size=15),
             on_click=State.toggle_trace,
@@ -269,6 +352,7 @@ def trace_panel() -> rx.Component:
             rx.vstack(
                 trace_header(),
                 rx.box(
+                    copy_fallback(),
                     trace_body(),
                     class_name="db-scroll",
                     padding="0.6rem",

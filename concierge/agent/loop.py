@@ -102,6 +102,10 @@ class ConversationSession:
     questions_asked: bool = False
     kit: Kit | None = None
     unservable_slots: list[str] = field(default_factory=list)
+    # Slots whose collections we never managed to READ. Not the same as unservable,
+    # and kept apart all the way to the user: one is a fact about stock, the other
+    # is the absence of one.
+    unchecked_slots: list[str] = field(default_factory=list)
     catalog: dict[str, CatalogProduct] = field(default_factory=dict)
     slot_products: dict[str, list[str]] = field(default_factory=dict)
     model_calls: int = 0
@@ -112,6 +116,16 @@ class ConversationSession:
 
 class _BudgetExceeded(Exception):
     pass
+
+
+# Matched by NAME, not by import: agent/ does not depend on commerce/, the catalog
+# backend is swappable, and tools.py already reads UnknownHandle/NoStockError the
+# same way. An import here would tie the loop to one backend.
+_RATE_LIMITED = {"CatalogUnavailable", "UcpRateLimited"}
+
+
+def _rate_limited(exc: BaseException) -> bool:
+    return type(exc).__name__ in _RATE_LIMITED
 
 
 async def _model(session: ConversationSession, **kwargs: Any) -> types.GenerateContentResponse:
@@ -306,22 +320,42 @@ async def _dispatch(name: str, args: dict[str, Any]) -> dict[str, Any]:
             return await fn(**args)
         except Exception as exc:
             emit("tool.error", {"tool": name, "attempt": attempt + 1, "error": str(exc)[:300]}, level="error")
+            if _rate_limited(exc):
+                # catalog.py already spent its whole backoff budget on this call.
+                # Three more rounds here would stall the turn and lean on a limiter
+                # that is asking us to stop; the model moves to another slot instead.
+                return {
+                    "error": f"{name} was rate-limited by Decathlon and could not be read.",
+                    "note": "This is NOT an empty collection. Do not say it carries nothing.",
+                }
             if attempt == MAX_TOOL_RETRIES:
                 return {"error": f"{name} failed after {MAX_TOOL_RETRIES + 1} attempts: {str(exc)[:200]}"}
             await asyncio.sleep(0.5 * (attempt + 1))
     return {"error": "unreachable"}
 
 
-async def _prefetch(session: ConversationSession) -> dict[str, list[str]]:
+@dataclass
+class _Prefetched:
+    stocked: dict[str, list[str]] = field(default_factory=dict)
+    empty: list[str] = field(default_factory=list)
+    # A handle we could not READ. Folding these in with `empty` told the model a
+    # live collection carries nothing right now — a stock claim invented from a
+    # request that never completed.
+    unchecked: list[str] = field(default_factory=list)
+
+
+async def _prefetch(session: ConversationSession) -> _Prefetched:
     """Slot handles are already validated against the live taxonomy, so fetching
     them is deterministic work — doing it in code rather than spending the
     6-tool-call budget on it is what lets 8 slots be covered instead of 3."""
     handles = list(dict.fromkeys(h for s in session.slots for h in s.collection_handles))
     if not handles:
-        return {}
+        return _Prefetched()
 
     # ucp.py's semaphore guards the MCP endpoint, not the storefront feed. 8 slots
-    # x 3 handles would put ~24 requests on decathlon.com at once.
+    # x 3 handles would put ~24 requests on decathlon.com at once — and that burst is
+    # the likeliest reason the storefront started returning 429 on 28 Jul. catalog.py
+    # now gates and backs off on its own; this stays as the outer bound.
     gate = asyncio.Semaphore(6)
     backend = tools.backend()
 
@@ -331,36 +365,55 @@ async def _prefetch(session: ConversationSession) -> dict[str, list[str]]:
 
     results = await asyncio.gather(*(fetch(h) for h in handles), return_exceptions=True)
 
-    stocked: dict[str, list[str]] = {}
-    empty: list[str] = []
+    out = _Prefetched()
     by_collection: dict[str, list[str]] = {}
     for handle, res in zip(handles, results):
         if isinstance(res, BaseException):
             emit("prefetch.error", {"handle": handle, "error": str(res)[:200]}, level="error")
+            out.unchecked.append(handle)
             continue
         if not res:
-            empty.append(handle)
+            out.empty.append(handle)
             continue
         for p in res:
             session.catalog[p.handle] = p
         by_collection[handle] = [p.handle for p in res]
-        stocked[handle] = [p.title[:90] for p in res]
+        out.stocked[handle] = [p.title[:90] for p in res]
 
     for slot in session.slots:
         found = [ph for h in slot.collection_handles for ph in by_collection.get(h, [])]
         if found:
             session.slot_products[slot.name] = list(dict.fromkeys(found))
 
-    if empty:
-        emit("guardrail.empty_collection", {"handles": empty}, level="guardrail")
-    emit("prefetch.done", {"handles": len(handles), "empty": empty, "products": len(session.catalog)})
-    return stocked
+    unreadable = set(out.unchecked)
+    session.unchecked_slots = [
+        s.name
+        for s in session.slots
+        if s.name not in session.slot_products and unreadable.intersection(s.collection_handles)
+    ]
+
+    if out.empty:
+        emit("guardrail.empty_collection", {"handles": out.empty}, level="guardrail")
+    if out.unchecked:
+        emit(
+            "guardrail.collection_unchecked",
+            {"handles": out.unchecked, "slots": session.unchecked_slots},
+            level="guardrail",
+        )
+    emit(
+        "prefetch.done",
+        {
+            "handles": len(handles),
+            "empty": out.empty,
+            "unchecked": out.unchecked,
+            "products": len(session.catalog),
+        },
+    )
+    return out
 
 
 async def _retrieve(session: ConversationSession, message: str) -> str:
-    stocked = await _prefetch(session)
-    planned = {h for s in session.slots for h in s.collection_handles}
-    empty = sorted(planned - set(stocked))
+    pre = await _prefetch(session)
 
     prompt = prompts.RETRIEVE_PROMPT.format(
         message=message,
@@ -372,8 +425,9 @@ async def _retrieve(session: ConversationSession, message: str) -> str:
             ]
         ),
         answers="\n".join(session.answers) or "(none)",
-        prefetched=json.dumps(stocked)[:20000] or "(nothing)",
-        empty=json.dumps(empty) or "[]",
+        prefetched=json.dumps(pre.stocked)[:20000] or "(nothing)",
+        empty=json.dumps(sorted(pre.empty)) or "[]",
+        unchecked=json.dumps(sorted(pre.unchecked)) or "[]",
         max_calls=MAX_TOOL_CALLS_PER_TURN,
     )
     history: list[types.Content] = [types.Content(role="user", parts=[types.Part(text=prompt)])]
@@ -450,6 +504,9 @@ def _merge_variants(items: list[KitItem]) -> list[KitItem]:
             merged[item.variant_id] = item
         else:
             seen.quantity += item.quantity
+            # The line now covers both of them; dropping the incoming one would make the
+            # card read as person 1's alone.
+            seen.person_indexes += [p for p in item.person_indexes if p not in seen.person_indexes]
     return list(merged.values())
 
 
@@ -488,6 +545,9 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
 
     party = max(1, session.profile.party_size if session.profile else 1)
     per_person = {s.name: s.per_person for s in session.slots}
+    # Counted per SLOT, not per pick: a party is usually split across two picks for the
+    # same slot (a women's boot and a men's one), not across two sizes inside one.
+    person_seq: dict[str, int] = {}
     items: list[KitItem] = []
     unservable = list(selection.unservable_slots)
     backend = tools.backend()
@@ -501,10 +561,12 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
             unservable.append(pick.slot)
             continue
 
+        personal = per_person.get(pick.slot, True)
+
         # Quantity is arithmetic, not a model opinion. One request per person on a
         # per-person slot, so a party in different sizes gets different variants
         # instead of two copies of one person's size.
-        if not per_person.get(pick.slot, True):
+        if not personal:
             requests: list[str | None] = [None]
         elif [s for s in pick.sizes if s.strip()]:
             requests = [s.strip() for s in pick.sizes if s.strip()][:6]
@@ -514,15 +576,25 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
         # A per-person product offering more than one in-stock variant is a size the
         # customer gets to choose. Anything else — a tent, a one-size item — is not
         # something to pester them about.
-        sized = per_person.get(pick.slot, True) and len([v for v in product.variants if v.available]) > 1
+        sized = personal and len([v for v in product.variants if v.available]) > 1
 
-        by_variant: dict[str, tuple[Any, int]] = {}
+        by_variant: dict[str, tuple[Any, int, list[int]]] = {}
         for want in requests:
             resolved = await backend.resolve_variant(product, want)
             if resolved is None:
                 continue
+            # One request is one person here, so this is where a person gets an ordinal.
+            # Shared kit and a party of one leave it empty: nobody to tell apart.
+            people: list[int] = []
+            if personal and party > 1:
+                person_seq[pick.slot] = person_seq.get(pick.slot, 0) + 1
+                people = [person_seq[pick.slot]]
             prev = by_variant.get(resolved.variant_gid)
-            by_variant[resolved.variant_gid] = (resolved, (prev[1] if prev else 0) + 1)
+            by_variant[resolved.variant_gid] = (
+                resolved,
+                (prev[1] if prev else 0) + 1,
+                (prev[2] if prev else []) + people,
+            )
 
         if not by_variant:
             emit("guardrail.out_of_stock", {"slot": pick.slot, "handle": product.handle}, level="guardrail")
@@ -545,9 +617,10 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
                     "available": resolved.available,
                     "size_substituted": resolved.substituted,
                     "size_confirmed": resolved.requested_size is not None or not sized,
+                    "person_indexes": people_,
                     "rationale": pick.rationale[:300],
                 }
-                for resolved, qty in by_variant.values()
+                for resolved, qty, people_ in by_variant.values()
             ]
         )
         items.extend(verdict.items)
@@ -577,11 +650,24 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
 # ── presentation ────────────────────────────────────────────────────────────
 
 
-def _disclosures(kit: Kit) -> str:
+def _disclosures(kit: Kit, unchecked: list[str] | None = None) -> str:
     """Emitted from data, not from the model, so they cannot be forgotten."""
     lines = list(check_substitution(kit.items)) + check_size_confirmation(kit.items)
-    if kit.unservable_slots:
-        lines.append("Not stocked right now: " + ", ".join(kit.unservable_slots) + ".")
+    # A slot we could not read reaches _select as unfilled and lands in
+    # unservable_slots like any other. Split it back out here, or the honest
+    # "couldn't check" line runs directly under a "not stocked" claim about the
+    # same slot.
+    unread = [s for s in (unchecked or []) if s in kit.unservable_slots]
+    not_stocked = [s for s in kit.unservable_slots if s not in unread]
+    if not_stocked:
+        lines.append("Not stocked right now: " + ", ".join(not_stocked) + ".")
+    if unread:
+        lines.append(
+            "I couldn't check Decathlon's stock for: "
+            + ", ".join(unread)
+            + " — they rate-limited me there, which is not the same as being sold out. "
+            "Ask me again and I'll retry."
+        )
     # An empty kit with a budget is the nothing-fits case, not a cheap one — the
     # naive gap arithmetic reports "$40.00 under" on a kit containing nothing.
     lines.append(check_budget(kit).message)
@@ -599,6 +685,7 @@ def _disclosure_figures(kit: Kit) -> list[int]:
 
 
 async def _present(session: ConversationSession, kit: Kit, allowed_minor: list[int]) -> str:
+    unread = [s for s in session.unchecked_slots if s in kit.unservable_slots]
     r = await _model(
         session,
         model=MODEL,
@@ -608,7 +695,8 @@ async def _present(session: ConversationSession, kit: Kit, allowed_minor: list[i
             kit=json.dumps(
                 [{"slot": i.slot, "title": i.product_title, "size": i.size_label} for i in kit.items]
             ),
-            unservable=json.dumps(kit.unservable_slots) or "[]",
+            unservable=json.dumps([s for s in kit.unservable_slots if s not in unread]) or "[]",
+            unchecked=json.dumps(unread) or "[]",
         ),
         config=_cfg(),
     )
@@ -660,7 +748,7 @@ async def run_turn(user_message: str, session: ConversationSession) -> TurnResul
                     "That message tried to override my instructions, so I've ignored it — I can't hand "
                     "out free or discounted items, and nothing here has changed.\n\nThis is the same kit "
                     "as before, at the same prices. Tell me what you'd actually like to adjust.\n\n"
-                    + _disclosures(session.kit)
+                    + _disclosures(session.kit, session.unchecked_slots)
                 )
             elif session.profile is not None:
                 result = await _continue(session, session.trip_message, result)
@@ -685,12 +773,27 @@ async def run_turn(user_message: str, session: ConversationSession) -> TurnResul
         )
         result.stage, result.error = "limit", "model call budget exceeded"
     except Exception as exc:
-        emit("turn.error", {"error": f"{type(exc).__name__}: {exc}"[:400]}, level="error")
-        result.text = (
-            "Something broke while I was building that. Tell me the trip again, or adjust it slightly, "
-            "and I'll retry."
-        )
-        result.stage, result.error = "error", f"{type(exc).__name__}: {exc}"[:300]
+        if _rate_limited(exc):
+            # Everything the turn got to is still on the session, and _continue resumes
+            # from whichever stage did not finish — so this is a pause, not a dead end.
+            # No wait time is quoted, and neither surface offers one worth quoting: the
+            # storefront advertises 60 s and does not honour it, MCP's is ~48 minutes.
+            emit("turn.rate_limited", {"error": f"{type(exc).__name__}: {exc}"[:400]}, level="error")
+            result.profile, result.slots = session.profile, session.slots
+            result.citations = session.citations
+            result.text = (
+                "Decathlon is rate-limiting me at the moment, and I'd rather stop than guess at "
+                "what's in stock. Nothing you've told me is lost — say \"keep going\" and I'll pick "
+                "up exactly where I left off."
+            )
+            result.stage, result.error = "rate_limited", f"{type(exc).__name__}: {exc}"[:300]
+        else:
+            emit("turn.error", {"error": f"{type(exc).__name__}: {exc}"[:400]}, level="error")
+            result.text = (
+                "Something broke while I was building that. Tell me the trip again, or adjust it slightly, "
+                "and I'll retry."
+            )
+            result.stage, result.error = "error", f"{type(exc).__name__}: {exc}"[:300]
 
     session.turns.append({"role": "assistant", "text": result.text})
     emit("turn.done", {"intent": result.intent, "stage": result.stage, "model_calls": session.model_calls})
@@ -701,33 +804,36 @@ async def _continue(session: ConversationSession, user_message: str, result: Tur
     if session.profile is None:
         session.trip_message = user_message
         session.research_text, session.citations = await _research(session, user_message)
-        # Committed to the session TOGETHER, at the end. Assigning session.profile
-        # before _plan_slots meant a failure there (a 429 on the taxonomy, live on
-        # 29 Jul 2026) left a half-built session: the retry took the `else` branch,
-        # skipped the question stage entirely, and built a kit on guessed sizes.
-        profile = await _profile(session, user_message)
-        slots = await _plan_slots(session, user_message)
-        session.profile, session.slots = profile, slots
-
-        result.profile, result.slots = session.profile, session.slots
-        result.citations = session.citations
-
-        if not session.questions_asked:
-            questions = await _questions(session)
-            session.questions_asked = True
-            if questions:
-                result.questions = questions
-                result.stage = "questions"
-                result.text = (
-                    f"{session.research_text}\n\n"
-                    f"That gives me {len(session.slots)} things to cover: "
-                    + ", ".join(s.name for s in session.slots)
-                    + ".\n\nBefore I pick real products:\n"
-                    + _render_questions(questions)
-                )
-                return result
-    else:
+        session.profile = await _profile(session, user_message)
+    elif session.questions_asked:
         session.answers.append(user_message)
+
+    # Each stage is skipped only if it actually completed, so a turn that died
+    # partway — a storefront 429 during slot planning is the observed case —
+    # resumes here instead of falling through to _retrieve with no slots and
+    # presenting an empty kit as if nothing were in stock. The message on a
+    # resume turn is a retry, not an answer: appending it to `answers` before
+    # the questions were asked would feed it to _plan_slots as a size.
+    if not session.slots:
+        session.slots = await _plan_slots(session, session.trip_message or user_message)
+
+    result.profile, result.slots = session.profile, session.slots
+    result.citations = session.citations
+
+    if not session.questions_asked:
+        questions = await _questions(session)
+        session.questions_asked = True
+        if questions:
+            result.questions = questions
+            result.stage = "questions"
+            result.text = (
+                f"{session.research_text}\n\n"
+                f"That gives me {len(session.slots)} things to cover: "
+                + ", ".join(s.name for s in session.slots)
+                + ".\n\nBefore I pick real products:\n"
+                + _render_questions(questions)
+            )
+            return result
 
     await _retrieve(session, session.trip_message or user_message)
     kit, unservable = await _select(session)
@@ -737,7 +843,9 @@ async def _continue(session: ConversationSession, user_message: str, result: Tur
     result.citations = session.citations
     result.kit, result.unservable_slots = kit, unservable
     result.text = (
-        await _present(session, kit, _disclosure_figures(kit)) + "\n\n" + _disclosures(kit)
+        await _present(session, kit, _disclosure_figures(kit))
+        + "\n\n"
+        + _disclosures(kit, session.unchecked_slots)
     ).strip()
     result.offer_cart = bool(kit.items)
     result.stage = "kit"

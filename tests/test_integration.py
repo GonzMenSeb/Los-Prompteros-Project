@@ -7,6 +7,8 @@ the suite stays green during the build and grows teeth as the lanes arrive.
 from __future__ import annotations
 
 import asyncio
+import json
+import time
 
 import pytest
 
@@ -460,6 +462,585 @@ class TestRateLimitPacing:
         assert ucp._paced is False
 
 
+def _profile(**over):
+    from concierge.domain.models import ActivityProfile, GroundedValue
+
+    base = dict(
+        discipline="trekking",
+        environment="desert",
+        party_size=1,
+        temp_min_c=GroundedValue(value=11.0, unit="C"),
+        temp_max_c=GroundedValue(value=32.0, unit="C"),
+        precipitation="none",
+        humidity="arid",
+        duration_hours=72.0,
+        overnight=True,
+    )
+    return ActivityProfile(**{**base, **over})
+
+
+def _handles(collection: str) -> list[str]:
+    from tests.conftest import catalog as reference
+
+    return [p.handle for p in reference(collection)]
+
+
+async def _run_select(monkeypatch, picks, *, profile=None, slots=()):
+    """Runs the real `_select` against the reference catalog with the model's selection
+    faked. `slots` is [(slot_name, collection_handle)]; `picks` is [{slot, handle}]."""
+    loop = _mod("concierge.agent.loop")
+    catalog = _mod("concierge.commerce.catalog")
+    tools = _mod("concierge.agent.tools")
+    from concierge.domain.models import GearSlot
+    from tests.conftest import catalog as reference
+
+    products: dict = {}
+    slot_products: dict = {}
+    for name, collection in slots:
+        found = {p.handle: p for p in reference(collection)}
+        products.update(found)
+        slot_products[name] = list(found)
+    catalog._resolved_cache.clear()
+
+    selection = loop._Selection(
+        picks=[loop._Pick(slot=p["slot"], product_handle=p["handle"], sizes=[]) for p in picks]
+    )
+
+    class _Response:
+        parsed = selection
+
+    async def fake_model(session, **kwargs):
+        return _Response()
+
+    monkeypatch.setattr(loop, "_model", fake_model)
+    tools.set_backend(catalog)
+
+    return await loop._select(
+        loop.ConversationSession(
+            profile=profile,
+            slots=[GearSlot(name=n, rationale="peat bog", collection_handles=[c]) for n, c in slots],
+            catalog=products,
+            slot_products=slot_products,
+        )
+    )
+
+
+class TestStorefrontBackoff:
+    """The storefront has its OWN limiter, separate from MCP's: `collections.json`
+    returned 429 on 28 Jul 2026 with no MCP lockout in play, and the unguarded
+    raise_for_status() behind get_taxonomy() killed the turn between profile.built
+    and turn.done.
+
+    It advertises `Retry-After: 60` and does not honour it (still 429 after 25 minutes
+    of quiet), so everything asserted here is about the budget WE chose rather than a
+    number Decathlon gave us — there is no recovery figure on this surface worth
+    acting on."""
+
+    @pytest.fixture(autouse=True)
+    def _rested(self):
+        cat = _mod("concierge.commerce.catalog")
+        cat._paced_until, cat._last_send, cat._taxonomy = 0.0, 0.0, None
+        cat._last_start = 0.0
+        yield
+        cat._paced_until, cat._last_send, cat._taxonomy = 0.0, 0.0, None
+        cat._last_start = 0.0
+
+    def test_the_storefront_never_reuses_a_connection(self):
+        """THE load-bearing property, and the one most likely to be "optimised" away:
+        decathlon.com's storefront 429s REUSED connections. Measured 28 Jul 2026, same
+        24-feed burst at 6 concurrent — requests with a shared Session got 4/24 at
+        6.4 req/s, requests with no Session got 24/24 at 11.4 req/s. Faster unpooled
+        AND clean, so it is neither rate nor the library. A Session here does not make
+        the feed quicker; it makes it stop working."""
+        import inspect
+        import requests
+
+        cat = _mod("concierge.commerce.catalog")
+
+        assert cat.client() is requests, (
+            "client() must hand back the requests MODULE, so every call opens and closes "
+            "its own connection. A Session pools, and pooled connections are refused."
+        )
+        assert "Session" not in inspect.getsource(cat._send), "the transport must not pool"
+
+    def test_the_mcp_surface_is_left_on_httpx(self):
+        """Two clients on purpose. The MCP limiter is a different one and is unaffected;
+        `create_cart` is the demo's proof and must not be collateral damage."""
+        import inspect
+
+        ucp = _mod("concierge.commerce.ucp")
+        assert "httpx" in inspect.getsource(ucp), "ucp.py must stay on httpx"
+
+    def _client(self, statuses: list[int], calls: list[str], headers: dict | None = None):
+        """Synchronous, because the storefront runs on `requests` — see the module
+        docstring in catalog.py for why it is not httpx."""
+        import requests
+
+        queue = list(statuses)
+        body = {"collections": [{"handle": "hiking-boots", "title": "Hiking Boots"}]}
+
+        class _Session:
+            def get(self, url, timeout=None):
+                calls.append(url)
+                status = queue.pop(0) if queue else 200
+                r = requests.Response()
+                r.status_code = status
+                r.url = url
+                if status == 200:
+                    r._content = json.dumps(body).encode()
+                    r.headers["Content-Type"] = "application/json"
+                else:
+                    r._content = b"local_rate_limited"
+                    r.headers.update(headers or {})
+                return r
+
+        return _Session()
+
+    def _quick(self, monkeypatch, cat):
+        monkeypatch.setattr(cat, "BACKOFF_BASE", 0.01)
+        monkeypatch.setattr(cat, "BACKOFF_CAP", 0.02)
+        monkeypatch.setattr(cat, "RETRY_BUDGET_SECONDS", 0.5)
+
+    async def test_a_429_is_retried_and_the_taxonomy_still_arrives(self, monkeypatch, sink):
+        cat = _mod("concierge.commerce.catalog")
+        calls: list[str] = []
+        self._quick(monkeypatch, cat)
+        fake = self._client([429, 200], calls)
+        monkeypatch.setattr(cat, "client", lambda: fake)
+
+        tax = await cat.get_taxonomy()
+
+        assert [c["handle"] for c in tax] == ["hiking-boots"]
+        assert len(calls) == 2, "a 429 on the storefront must be retried, not raised at the turn"
+        assert any(e.event == "catalog.rate_limited" for e in sink)
+        assert any(e.event == "catalog.retry" for e in sink)
+
+    async def test_a_persistent_429_degrades_instead_of_hanging(self, monkeypatch):
+        cat = _mod("concierge.commerce.catalog")
+        calls: list[str] = []
+        self._quick(monkeypatch, cat)
+        fake = self._client([429] * 20, calls)
+        monkeypatch.setattr(cat, "client", lambda: fake)
+
+        started = time.monotonic()
+        with pytest.raises(cat.CatalogUnavailable) as exc:
+            await cat.get_taxonomy()
+        elapsed = time.monotonic() - started
+
+        assert exc.value.rate_limited is True
+        assert len(calls) <= cat.MAX_ATTEMPTS, f"{len(calls)} attempts against a limiter asking us to stop"
+        assert elapsed < 2.0, f"the retry budget is a TOTAL, and _tax_lock is held for all of it ({elapsed:.1f}s)"
+
+    async def test_the_measured_retry_after_60_degrades_after_one_attempt(self, monkeypatch):
+        """THE live path, not an edge case: `Retry-After: 60` is what the storefront
+        actually sends (measured 28 Jul 2026). 60 s is not absurd the way MCP's 48
+        minutes is — it is just longer than a turn can wait, and `_tax_lock` is held
+        for all of it. Pinned because the backoff ladder therefore never runs against
+        the real surface, and a fake with no Retry-After header would hide that."""
+        cat = _mod("concierge.commerce.catalog")
+        calls: list[str] = []
+        fake = self._client([429] * 20, calls, {"Retry-After": "60"})
+        monkeypatch.setattr(cat, "client", lambda: fake)
+
+        started = time.monotonic()
+        with pytest.raises(cat.CatalogUnavailable) as exc:
+            await cat.get_taxonomy()
+        elapsed = time.monotonic() - started
+
+        assert exc.value.rate_limited is True
+        assert len(calls) == 1, "an honest 60s hint must end the sequence, not start a ladder"
+        assert elapsed < 1.0, f"the turn must not sit inside _tax_lock for a minute ({elapsed:.1f}s)"
+        assert cat._paced() is True, "the latch still engages — the next turn must not burst"
+
+    async def test_a_retry_after_we_cannot_outwait_is_reported_not_slept(self, monkeypatch):
+        """MCP's Retry-After is ~48 minutes and honest. A storefront hint longer than
+        the budget gets the same treatment: report it, never sleep it. A stalled turn
+        is worse than a short kit."""
+        cat = _mod("concierge.commerce.catalog")
+        calls: list[str] = []
+        fake = self._client([429] * 20, calls, {"Retry-After": "1503"})
+        monkeypatch.setattr(cat, "client", lambda: fake)
+
+        started = time.monotonic()
+        with pytest.raises(cat.CatalogUnavailable):
+            await cat.get_taxonomy()
+
+        assert time.monotonic() - started < 1.0
+        assert len(calls) == 1, "a hint that outlives the budget must end the sequence immediately"
+
+    async def test_a_404_is_not_retried(self, monkeypatch):
+        cat = _mod("concierge.commerce.catalog")
+        calls: list[str] = []
+        self._quick(monkeypatch, cat)
+        fake = self._client([404] * 4, calls)
+        monkeypatch.setattr(cat, "client", lambda: fake)
+
+        with pytest.raises(cat.CatalogUnavailable) as exc:
+            await cat._get(f"{cat.BASE}/collections/nope/products.json", "collection:nope")
+
+        assert exc.value.status == 404
+        assert exc.value.rate_limited is False
+        assert len(calls) == 1, "retrying a 404 spends the budget on an answer that will not change"
+
+    async def test_a_transport_failure_is_retried_too(self, monkeypatch):
+        cat = _mod("concierge.commerce.catalog")
+        import requests
+
+        self._quick(monkeypatch, cat)
+        calls: list[str] = []
+        body = {"collections": [{"handle": "hiking-boots", "title": "Hiking Boots"}]}
+
+        class _Flaky:
+            def get(self, url, timeout=None):
+                calls.append(url)
+                if len(calls) == 1:
+                    raise requests.ConnectTimeout("connect timed out")
+                r = requests.Response()
+                r.status_code, r.url, r._content = 200, url, json.dumps(body).encode()
+                return r
+
+        flaky = _Flaky()
+        monkeypatch.setattr(cat, "client", lambda: flaky)
+
+        assert [c["handle"] for c in await cat.get_taxonomy()] == ["hiking-boots"]
+        assert len(calls) == 2
+
+    async def test_the_latch_paces_the_storefront_and_then_decays(self, monkeypatch):
+        """ucp.py's latch is permanent because create_cart is ONE call per demo.
+        _prefetch is ~24 every turn, so a permanent latch here would charge every
+        later turn ~36s for one transient 429."""
+        cat = _mod("concierge.commerce.catalog")
+
+        cat._latch()
+        assert cat._paced() is True
+
+        cat._paced_until = time.monotonic() - 0.01
+        assert cat._paced() is False
+
+    async def test_paced_storefront_calls_are_serialised_and_spaced(self, monkeypatch):
+        cat = _mod("concierge.commerce.catalog")
+        calls: list[str] = []
+        stamps: list[float] = []
+        monkeypatch.setattr(cat, "PACE_SECONDS", 0.08)
+        cat._latch()
+
+        client = self._client([], calls)
+        original = client.get
+
+        def timed(url, timeout=None):
+            stamps.append(time.monotonic())
+            return original(url, timeout)
+
+        client.get = timed
+        monkeypatch.setattr(cat, "client", lambda: client)
+
+        await asyncio.gather(*(cat._get(f"{cat.BASE}/x{i}", "probe") for i in range(3)))
+
+        gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+        assert len(stamps) == 3
+        assert all(g >= 0.07 for g in gaps), f"concurrency is what re-trips a limiter: {gaps}"
+
+    async def test_a_stale_taxonomy_beats_a_dead_turn(self, monkeypatch, sink):
+        """Handles and titles are stable and the taxonomy is already a process-lifetime
+        cache, so serving the last good copy costs nothing true. Availability never
+        comes from it."""
+        cat = _mod("concierge.commerce.catalog")
+        calls: list[str] = []
+        cat._taxonomy = [{"handle": "hiking-boots", "title": "Hiking Boots"}]
+        fake = self._client([429] * 20, calls, {"Retry-After": "1503"})
+        monkeypatch.setattr(cat, "client", lambda: fake)
+
+        tax = await cat.get_taxonomy(force=True)
+
+        assert tax == [{"handle": "hiking-boots", "title": "Hiking Boots"}]
+        assert any(e.event == "catalog.taxonomy_stale" for e in sink)
+
+    async def test_with_nothing_cached_it_raises_rather_than_inventing_a_taxonomy(self, monkeypatch):
+        cat = _mod("concierge.commerce.catalog")
+        calls: list[str] = []
+        fake = self._client([429] * 20, calls, {"Retry-After": "1503"})
+        monkeypatch.setattr(cat, "client", lambda: fake)
+
+        with pytest.raises(cat.CatalogUnavailable):
+            await cat.get_taxonomy()
+
+
+class TestUncheckedIsNotEmpty:
+    """`_prefetch` dropped a failed handle with `continue`, so `_retrieve`'s
+    `planned - stocked` arithmetic folded it in with the genuinely empty ones and the
+    model was told a live collection "currently has no products in stock… say so".
+    That is a fabricated inventory claim built from a request that never completed."""
+
+    async def test_a_failed_handle_is_unchecked_not_empty(self, monkeypatch):
+        loop = _mod("concierge.agent.loop")
+        cat = _mod("concierge.commerce.catalog")
+        tools = _mod("concierge.agent.tools")
+        from concierge.domain.models import GearSlot
+        from tests.conftest import catalog as reference
+
+        products = reference("hiking-boots")
+
+        class _Backend:
+            async def get_collection(self, handle, limit=12):
+                if handle == "sleeping-bags":
+                    raise cat.CatalogUnavailable(f"{cat.BASE}/collections/sleeping-bags", 429, "HTTP 429")
+                if handle == "bike-helmet":
+                    return []
+                return products
+
+        monkeypatch.setattr(tools, "_backend", _Backend())
+        session = loop.ConversationSession(
+            slots=[
+                GearSlot(name="boots", rationale="bog", collection_handles=["hiking-boots"]),
+                GearSlot(name="sleep", rationale="two nights", collection_handles=["sleeping-bags"]),
+                GearSlot(name="helmet", rationale="none", collection_handles=["bike-helmet"]),
+            ]
+        )
+
+        pre = await loop._prefetch(session)
+
+        assert pre.unchecked == ["sleeping-bags"]
+        assert pre.empty == ["bike-helmet"]
+        assert "hiking-boots" in pre.stocked
+        assert session.unchecked_slots == ["sleep"], "the slot must inherit the doubt, not the claim"
+
+    def test_the_disclosure_separates_could_not_check_from_not_stocked(self):
+        loop = _mod("concierge.agent.loop")
+        kit = Kit(items=[item()], unservable_slots=["gaiters", "sleeping bag"])
+
+        text = loop._disclosures(kit, ["sleeping bag"])
+
+        not_stocked = text[text.index("Not stocked"):]
+        assert "gaiters" in not_stocked.split("\n")[0]
+        assert "sleeping bag" not in not_stocked.split("\n")[0], "a slot we never read is not a stock claim"
+        assert "couldn't check" in text
+        assert "sold out" in text, "the user needs to be told the difference explicitly"
+
+
+class TestARateLimitIsAPauseNotADeadEnd:
+    """The observed failure: 429 on collections.json during slot planning, turn.error,
+    stage=error. The session kept its profile but never got slots, so the NEXT message
+    fell through to _retrieve with nothing planned and would have presented an empty
+    kit as though Decathlon stocked nothing."""
+
+    def _session_at_slot_planning(self, loop):
+        return loop.ConversationSession(
+            trip_message="three days trekking in Chicamocha Canyon",
+            profile=_profile(),
+            questions_asked=True,
+        )
+
+    async def test_a_rate_limit_is_reported_as_a_pause_and_keeps_the_session(self, monkeypatch, sink):
+        loop = _mod("concierge.agent.loop")
+        cat = _mod("concierge.commerce.catalog")
+        from concierge.domain.models import IntentVerdict
+
+        async def gate(message, context=""):
+            return IntentVerdict(intent="activity_kit", reason="")
+
+        async def rate_limited(*a, **kw):
+            raise cat.CatalogUnavailable(f"{cat.BASE}/collections.json?limit=250", 429, "HTTP 429")
+
+        monkeypatch.setattr(loop, "classify", gate)
+        monkeypatch.setattr(loop, "_plan_slots", rate_limited)
+        session = self._session_at_slot_planning(loop)
+
+        result = await loop.run_turn("keep going", session)
+
+        assert result.stage == "rate_limited", "a limiter is not a crash and must not read as one"
+        assert result.profile is not None, "the turn's work so far has to survive it"
+        assert session.profile is not None
+        assert "rate-limit" in result.text.lower()
+        assert not any(str(n) in result.text for n in (48, 1503)), "no wait time we cannot stand behind"
+        assert any(e.event == "turn.rate_limited" for e in sink)
+        assert not any(e.event == "turn.error" for e in sink)
+
+    async def test_the_next_turn_resumes_slot_planning_instead_of_an_empty_kit(self, monkeypatch):
+        loop = _mod("concierge.agent.loop")
+        cat = _mod("concierge.commerce.catalog")
+        from concierge.domain.models import GearSlot, IntentVerdict
+
+        planned: list[str] = []
+
+        async def gate(message, context=""):
+            return IntentVerdict(intent="activity_kit", reason="")
+
+        async def failing_plan(*a, **kw):
+            raise cat.CatalogUnavailable(f"{cat.BASE}/collections.json?limit=250", 429, "HTTP 429")
+
+        async def working_plan(session, message):
+            planned.append(message)
+            return [GearSlot(name="boots", rationale="rock", collection_handles=["hiking-boots"])]
+
+        async def no_op(*a, **kw):
+            return ""
+
+        async def select(session):
+            return Kit(items=[item()]), []
+
+        async def present(session, kit, allowed):
+            return "here is the kit"
+
+        monkeypatch.setattr(loop, "classify", gate)
+        monkeypatch.setattr(loop, "_retrieve", no_op)
+        monkeypatch.setattr(loop, "_select", select)
+        monkeypatch.setattr(loop, "_present", present)
+        session = self._session_at_slot_planning(loop)
+
+        monkeypatch.setattr(loop, "_plan_slots", failing_plan)
+        first = await loop.run_turn("build it", session)
+        assert first.stage == "rate_limited"
+        assert session.slots == []
+
+        monkeypatch.setattr(loop, "_plan_slots", working_plan)
+        second = await loop.run_turn("keep going", session)
+
+        assert second.stage == "kit", f"the retry stalled at {second.stage}: {second.text[:120]}"
+        assert [s.name for s in session.slots] == ["boots"], "slot planning must resume, not be skipped"
+        assert planned == ["three days trekking in Chicamocha Canyon"], (
+            "the resume must re-plan against the TRIP, not against the word 'keep going'"
+        )
+
+    async def test_a_retry_message_is_not_filed_as_an_answer(self, monkeypatch):
+        """`answers` is fed to _plan_slots and _select as the user's sizes and budget.
+        A resume message landing there reads as a size."""
+        loop = _mod("concierge.agent.loop")
+        from concierge.domain.models import GearSlot, IntentVerdict
+
+        async def gate(message, context=""):
+            return IntentVerdict(intent="activity_kit", reason="")
+
+        async def research(session, message):
+            return "conditions", []
+
+        async def profile(session, message):
+            return _profile()
+
+        async def plan(session, message):
+            return [GearSlot(name="boots", rationale="rock", collection_handles=["hiking-boots"])]
+
+        async def questions(session):
+            return []
+
+        async def no_op(*a, **kw):
+            return ""
+
+        async def select(session):
+            return Kit(items=[item()]), []
+
+        async def present(session, kit, allowed):
+            return "kit"
+
+        for name, fn in (
+            ("classify", gate),
+            ("_research", research),
+            ("_profile", profile),
+            ("_plan_slots", plan),
+            ("_questions", questions),
+            ("_retrieve", no_op),
+            ("_select", select),
+            ("_present", present),
+        ):
+            monkeypatch.setattr(loop, name, fn)
+
+        session = loop.ConversationSession()
+        await loop.run_turn("three days in the canyon", session)
+        assert session.answers == [], "turn one is the trip, not an answer"
+
+        await loop.run_turn("I'm a 9.5 and men's L", session)
+        assert session.answers == ["I'm a 9.5 and men's L"]
+
+
+class TestTheUiSaysWhenItIsBeingRateLimited:
+    """A backoff is the one wait that must not read as a hang. `catalog._get` can sit
+    on a retry for seconds while the spinner still says "Reading the conditions…",
+    which is a lie about what the app is doing. Driven off the trace because the trace
+    is already drained into the UI mid-turn — anything returned by run_turn arrives
+    only once the turn is over, which is too late to be a loading message."""
+
+    def _state(self):
+        mod = _mod("concierge.state")
+        return mod, mod.State(_reflex_internal_init=True)
+
+    def _ev(self, event: str):
+        from concierge.obs.trace import TraceEvent
+
+        return TraceEvent(seq=1, ts=0.0, event=event, payload={}, level="error")
+
+    def test_a_429_changes_the_loading_message_mid_turn(self):
+        mod, state = self._state()
+        state.status, state.throttled = "Reading the conditions…", False
+
+        state._drain([self._ev("catalog.rate_limited")])
+
+        assert state.throttled is True
+        assert state.status != "Reading the conditions…", "the spinner must stop claiming to read"
+        assert "rate-limit" in state.status.lower()
+
+    def test_carrying_on_reads_differently_from_still_trying(self):
+        mod, state = self._state()
+
+        state._drain([self._ev("catalog.retry")])
+        retrying = state.status
+        state._drain([self._ev("catalog.unavailable")])
+
+        assert state.status != retrying, (
+            "'still trying' and 'gave up on that one and carried on' are different facts "
+            "and the user is entitled to both"
+        )
+
+    def test_the_messages_promise_no_wait_time(self):
+        """Neither surface offers one worth quoting: the storefront advertises 60 s and
+        does not honour it, MCP's is ~48 minutes. A countdown we cannot stand behind is
+        worse than none."""
+        import re
+
+        mod, _ = self._state()
+        for text in (mod._RETRYING, mod._DEGRADED):
+            assert not re.search(r"\d", text), f"no countdown we cannot keep: {text!r}"
+
+    def test_it_keys_on_events_that_are_actually_emitted(self):
+        """The mapping is by event NAME, so a rename in catalog.py silently strips the
+        loading message with nothing failing."""
+        import inspect
+
+        mod, _ = self._state()
+        emitted = "".join(
+            inspect.getsource(_mod(m))
+            for m in ("concierge.commerce.catalog", "concierge.commerce.ucp", "concierge.agent.loop")
+        )
+        for event in mod._THROTTLE_STATUS:
+            assert f'"{event}"' in emitted, (
+                f"{event!r} is in _THROTTLE_STATUS but nothing emits it — a rename left the "
+                "throttled loading message unreachable"
+            )
+
+    def test_a_new_turn_and_a_clean_slate_both_start_unthrottled(self):
+        import inspect
+
+        mod, state = self._state()
+        src = inspect.getsource(getattr(mod.State.send_message, "fn", mod.State.send_message))
+        assert "self.throttled = False" in src, "a stale warn state would carry into the next turn"
+
+        state.throttled = True
+        state.clear()
+        assert state.throttled is False
+
+    def test_the_throttled_state_looks_different_and_not_only_reads_different(self):
+        import inspect
+
+        chat = _mod("concierge.ui.chat")
+        assert "State.throttled" in inspect.getsource(chat.thinking)
+
+        # `.style` comparison yields a Var, not a bool — compare the rendered markup.
+        normal = str(chat._waiting(chat.BRAND, chat.WHITE, chat.TINT_3))
+        warned = str(chat._waiting(chat.WARN, chat.WARN_BG, chat.WARN, "takes longer"))
+
+        assert normal != warned, "a rate limit should be visible, not just legible"
+        assert chat.WARN in warned and chat.WARN not in normal
+        assert "takes longer" in warned, "the reassurance line must actually render"
+
+
 class TestSelectionBuildsTheKit:
     """`_select` had no offline coverage at all, and a rename that left one stale
     reference behind therefore reached a live run before anything caught it. Feed-first
@@ -722,3 +1303,228 @@ class TestReconnectDoesNotRestartTheWalkthrough:
         state.walkthrough_stage = 2
         state.clear()
         assert state.walkthrough_stage == 0
+
+
+class TestPasswordGate:
+    """The app is on a public URL. What the gate protects is the Gemini quota and
+    Decathlon's rate limiter — a lockout is ~48 minutes for everybody, us included."""
+
+    def test_the_gate_is_off_when_no_password_is_configured(self):
+        """Unset DECABOT_PASSWORD must leave local dev, `make walkthrough` and this
+        suite untouched — the same fail-open reasoning as CONCIERGE_VIP_TOKEN."""
+        state_mod = _mod("concierge.state")
+        assert state_mod.GATE_ON is False
+        assert state_mod._GATE_DIGEST == ""
+
+    def test_unlocked_defaults_to_false_regardless_of_configuration(self):
+        """A state var's default is compiled INTO the frontend bundle, and the image is
+        built without DECABOT_PASSWORD set. `not GATE_ON` therefore baked in as True and
+        served the unlocked app shell to any browser whose websocket never connected."""
+        import inspect
+
+        state_mod = _mod("concierge.state")
+        assert state_mod.State(_reflex_internal_init=True).unlocked is False
+        src = inspect.getsource(state_mod.State)
+        assert "unlocked: bool = False" in src, (
+            "the default must be a literal False, never derived from GATE_ON"
+        )
+
+    def test_on_page_load_opens_the_gate_when_it_is_off(self):
+        """Because the default is now hard False, something has to open it."""
+        import inspect
+
+        state_mod = _mod("concierge.state")
+        src = inspect.getsource(getattr(state_mod.State.on_page_load, "fn", state_mod.State.on_page_load))
+        assert "if not GATE_ON:" in src and "self.unlocked = True" in src
+
+    def test_every_spending_handler_rechecks_the_gate(self):
+        """Conditional rendering is not a guard: the events are callable over the wire
+        whatever is on screen. Same reasoning as confirm_cart's own re-check.
+
+        The guard must be `GATE_ON and not self.unlocked`, never a bare
+        `not self.unlocked`. scripts/verify_walkthrough.py and verify_ui.py call these
+        handlers directly with no browser, so on_page_load never runs to open the gate —
+        the bare form made `make rehearse` return instantly and assert nothing, which
+        `make check` cannot see because the walkthrough is a live path."""
+        import inspect
+
+        state_mod = _mod("concierge.state")
+        for name in ("send_message", "confirm_cart", "run_walkthrough"):
+            handler = getattr(state_mod.State, name)
+            src = inspect.getsource(getattr(handler, "fn", handler))
+            assert "GATE_ON and not self.unlocked" in src, (
+                f"{name} must guard on `GATE_ON and not self.unlocked`; the bare\n"
+                "  `not self.unlocked` silently disables the headless verify scripts"
+            )
+
+    async def test_the_right_password_unlocks_and_the_wrong_one_does_not(self, monkeypatch):
+        import hashlib
+
+        state_mod = _mod("concierge.state")
+        password = "correct horse battery staple"
+        digest = hashlib.sha256(b"decabot.gate.v1:" + password.encode()).hexdigest()
+        monkeypatch.setattr(state_mod, "GATE_ON", True)
+        monkeypatch.setattr(state_mod, "GATE_PASSWORD", password)
+        monkeypatch.setattr(state_mod, "_GATE_DIGEST", digest)
+        monkeypatch.setattr(state_mod, "_GATE_DELAY", 0)
+        unlock = getattr(state_mod.State.unlock, "fn", state_mod.State.unlock)
+
+        state = state_mod.State(_reflex_internal_init=True)
+        state.unlocked = False
+        async for _ in unlock(state, {"password": "nope"}):
+            pass
+        assert state.unlocked is False
+        assert state.gate_error != ""
+        assert state.gate_key == ""
+
+        state.unlocked = False
+        async for _ in unlock(state, {"password": password}):
+            pass
+        assert state.unlocked is True
+        # The cookie carries a digest, never the password itself.
+        assert state.gate_key == digest
+        assert password not in state.gate_key
+
+    def test_clear_does_not_relock_the_app(self):
+        """`Start over` resets the conversation, not the visitor's admission."""
+        state_mod = _mod("concierge.state")
+        state = state_mod.State(_reflex_internal_init=True)
+        state.unlocked = True
+        state.clear()
+        assert state.unlocked is True
+
+    async def test_the_headless_verify_scripts_still_get_past_the_gate(self, monkeypatch):
+        """`make rehearse` drives run_walkthrough with no browser, so on_page_load never
+        runs. Behavioural companion to the source assertion above: with the gate off, a
+        never-unlocked State must still enter the script rather than return silently.
+
+        The single beat is a cart beat with no standing offer, which run_walkthrough
+        handles by setting `error` — so this asserts the guard, not the network."""
+        state_mod = _mod("concierge.state")
+        wt = _mod("concierge.walkthrough")
+        beat = wt.Beat(phase="onstage", label="probe", shows="the guard", message=wt.CART_BEAT)
+        monkeypatch.setattr(wt, "beats", lambda phase=None: [beat])
+        assert state_mod.GATE_ON is False
+
+        state = state_mod.State(_reflex_internal_init=True)
+        assert state.unlocked is False, "the client-facing default must stay fail-closed"
+        async for _ in state.run_walkthrough("onstage"):
+            pass
+
+        assert state.walkthrough_stage == 2, "run_walkthrough returned without running"
+        assert "never built" in state.error
+
+
+class TestTheKitSaysWhoEachLineIsFor:
+    """A party of two splits across two picks for ONE slot — a women's boot and a men's
+    one — not across two sizes inside one pick, so the person counter has to run per
+    slot rather than per pick. The ordinal then has to survive `_merge_variants`, which
+    folds two people onto a single cart line."""
+
+    def test_two_people_on_one_variant_keep_both_ordinals(self):
+        """The latent case the fixture does not reach: same product, same size, two
+        people. `_merge_variants` exists because create_cart merges identical variants
+        into one line, so a scalar `person` field would have had to drop one of them —
+        and the card would then read as person 1's alone."""
+        loop = _mod("concierge.agent.loop")
+
+        merged = loop._merge_variants([item(person_indexes=[1]), item(person_indexes=[2])])
+
+        assert len(merged) == 1, "identical variants are one cart line"
+        assert merged[0].quantity == 2
+        assert merged[0].person_indexes == [1, 2]
+
+    @pytest.mark.parametrize(
+        "party,picks,expected",
+        # A solo trip has nobody to tell apart, so it must stay unlabelled: a
+        # "Person 1" heading over the whole kit is noise, not information.
+        [(2, 2, [1, 2]), (1, 1, [])],
+    )
+    async def test_one_ordinal_per_person_across_a_slots_picks(
+        self, monkeypatch, party, picks, expected
+    ):
+        kit, _ = await _run_select(
+            monkeypatch,
+            [{"slot": "boots", "handle": h} for h in _handles("hiking-boots")[:picks]],
+            profile=_profile(party_size=party),
+            slots=[("boots", "hiking-boots")],
+        )
+
+        assert sorted(n for i in kit.items for n in i.person_indexes) == expected
+
+    def test_a_line_covering_both_people_is_shared_not_person_1s(self):
+        """Under a per-person heading it would read as person 1's alone, and listing it
+        under both would show one cart line twice."""
+        state_mod = _mod("concierge.state")
+        state = state_mod.State(_reflex_internal_init=True)
+        state.kit_items = [
+            item(slot="boots", person_indexes=[1]),
+            item(slot="shell", person_indexes=[2]),
+            item(slot="tent", person_indexes=[]),
+            item(slot="sleeping_bag", quantity=2, person_indexes=[1, 2]),
+        ]
+
+        cards = state.cards
+        assert len(cards) == 4, "every line renders exactly once"
+        assert [c.person_heading for c in cards] == ["Person 1", "Person 2", "Shared", ""], (
+            "one heading per block, on the first card of the block"
+        )
+        assert [c.slot_label for c in cards[2:]] == ["TENT", "SLEEPING BAG"], (
+            "the shared block is contiguous and last"
+        )
+
+    def test_a_kit_with_nobody_named_gets_no_headings_at_all(self):
+        state_mod = _mod("concierge.state")
+        state = state_mod.State(_reflex_internal_init=True)
+        state.kit_items = [item(slot="boots"), item(slot="tent")]
+
+        cards = state.cards
+        assert len(cards) == 2
+        assert all(c.person_heading == "" for c in cards), (
+            "a party of one has nobody to tell apart — not even a 'Shared' heading"
+        )
+
+    def test_a_big_party_is_not_ordered_alphabetically(self):
+        """Ordinals rather than rendered names is what buys this: sorted as strings,
+        "Person 10" lands between "Person 1" and "Person 2"."""
+        state_mod = _mod("concierge.state")
+        state = state_mod.State(_reflex_internal_init=True)
+        state.kit_items = [item(slot=f"s{n}", person_indexes=[n]) for n in (1, 10, 2, 11, 3)]
+
+        assert [c.person_heading for c in state.cards] == [
+            "Person 1", "Person 2", "Person 3", "Person 10", "Person 11",
+        ]
+
+    def test_the_kit_grid_still_builds(self):
+        """This is the test that was missing. The heading started life as a list of
+        group models each holding a list of cards, and the state var for it passed every
+        assertion in Python — while the page died at component construction, taking the
+        app's only route with it. Constructing the components is where that surfaces."""
+        product = _mod("concierge.ui.product")
+        cart = _mod("concierge.ui.cart")
+        chat = _mod("concierge.ui.chat")
+
+        for build in (product.kit_grid, cart.confirm_bar, chat.composer, chat.chat_panel):
+            build()
+
+    def test_the_fixture_gives_each_person_a_size_to_confirm(self):
+        """`make walkthrough` is the only place most people see this. A fixture where
+        only one person has an unconfirmed size cannot show the per-person split."""
+        demo_data = _mod("concierge.ui.demo_data")
+        kit = demo_data.demo_kit()
+
+        owners = {n for i in kit.items if not i.size_confirmed for n in i.person_indexes}
+        assert owners == {1, 2}, f"both people must be asked, got {owners}"
+
+    def test_the_note_counts_what_it_is_asking_about(self):
+        state_mod = _mod("concierge.state")
+        state = state_mod.State(_reflex_internal_init=True)
+
+        state.kit_items = [item(slot="boots", size_confirmed=False)]
+        assert "1 item is" in state.unconfirmed_note
+
+        state.kit_items = [
+            item(slot="boots", size_confirmed=False),
+            item(slot="shell", size_confirmed=False),
+        ]
+        assert "2 items are" in state.unconfirmed_note

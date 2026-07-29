@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx
 import pytest
+import requests
 
 from concierge.commerce.ucp import CONTEXT, EP, PROF, UcpRateLimited, UcpToolError, aclose, call_ucp
 from concierge.domain.models import major_string_to_minor
@@ -63,7 +64,7 @@ def _rpc(tool: str, args: dict[str, Any], *, profile_in_params: bool = False) ->
 
 
 async def _probe() -> dict[str, Any]:
-    out: dict[str, Any] = {"rate_limited": False}
+    out: dict[str, Any] = {"rate_limited": False, "storefront_status": None}
     catalog_arg = {"catalog": {"id": PRODUCT_GID, "context": CONTEXT}}
 
     async with httpx.AsyncClient(timeout=45, headers={"Content-Type": "application/json"}) as raw:
@@ -91,17 +92,25 @@ async def _probe() -> dict[str, Any]:
         out["bad_cart_status"] = r.status_code
         out["bad_cart_body"] = r.json()
 
-        # The storefront feed is a SEPARATE surface that stays healthy through an
-        # MCP lockout, so it is fetched unconditionally and its tests take `live`
-        # rather than `mcp` — they still run when the MCP half is locked out.
-        for key, url in (
-            ("collections", f"{BASE}/collections.json?limit=250"),
-            ("empty_collection", f"{BASE}/collections/bike-helmet/products.json?limit=12"),
-            ("stocked_collection", f"{BASE}/collections/hiking-boots/products.json?limit=12"),
-        ):
-            fr = await raw.get(url)
-            fr.raise_for_status()
-            out[key] = fr.json()
+    # The storefront feed is a SEPARATE surface that stays healthy through an MCP
+    # lockout, so it is fetched unconditionally and its tests take `storefront` rather
+    # than `mcp` — they still run when the MCP half is locked out.
+    #
+    # FETCHED WITH `requests`, NO SESSION, DELIBERATELY — the same transport
+    # commerce/catalog.py ships. decathlon.com's storefront 429s REUSED connections,
+    # so probing it over the httpx client above would skip these three tests forever
+    # while the app itself works fine. A contract test has to exercise the transport
+    # we actually ship, or it is testing a configuration nobody runs.
+    for key, url in (
+        ("collections", f"{BASE}/collections.json?limit=250"),
+        ("empty_collection", f"{BASE}/collections/bike-helmet/products.json?limit=12"),
+        ("stocked_collection", f"{BASE}/collections/hiking-boots/products.json?limit=12"),
+    ):
+        fr = requests.get(url, timeout=30)
+        if fr.status_code >= 400:
+            out["storefront_status"] = fr.status_code
+            break
+        out[key] = fr.json()
 
     if out["rate_limited"]:
         return out
@@ -141,6 +150,21 @@ async def _probe() -> dict[str, Any]:
 @pytest.fixture(scope="module")
 def live() -> dict[str, Any]:
     return asyncio.run(_probe())
+
+
+@pytest.fixture(scope="module")
+def storefront(live) -> dict[str, Any]:
+    """The storefront half. Separate from `mcp` so an MCP lockout does not hide the
+    catalog facts, and from `live` so the storefront's own limiter reports as a skip."""
+    if live["storefront_status"] is not None:
+        pytest.skip(
+            f"storefront returned HTTP {live['storefront_status']} — its own limiter, not a "
+            "contract violation. This probe already uses the shipped transport (requests, no "
+            "Session, one connection per request), so if it is 429 the app is too. Retry-After "
+            "says 60 and is not a recovery time; MCP's 48 minutes does not transfer. See "
+            "AGENTS.md: the storefront refuses REUSED connections."
+        )
+    return live
 
 
 @pytest.fixture(scope="module")
@@ -306,8 +330,8 @@ def test_long_query_returns_zero(mcp):
 
 
 @pytest.mark.live
-def test_collection_handles_resolve(live):
-    handles = {c["handle"] for c in mcp["collections"]["collections"]}
+def test_collection_handles_resolve(storefront):
+    handles = {c["handle"] for c in storefront["collections"]["collections"]}
     assert len(handles) >= 200, f"Collection count collapsed to {len(handles)}. {FACTS} says 228."
 
     missing = [h for h in SHIPPED_HANDLES if h not in handles]
@@ -323,8 +347,8 @@ def test_collection_handles_resolve(live):
 
 
 @pytest.mark.live
-def test_empty_collection_is_legal(live):
-    assert mcp["empty_collection"]["products"] == [], (
+def test_empty_collection_is_legal(storefront):
+    assert storefront["empty_collection"]["products"] == [], (
         f"'bike-helmet' now returns products. {FACTS} says a collection can exist and be empty,\n"
         "  which is why check_coverage() marks the slot unservable instead of erroring. Pick another\n"
         "  reliably-empty handle for this test rather than deleting it."
@@ -332,8 +356,8 @@ def test_empty_collection_is_legal(live):
 
 
 @pytest.mark.live
-def test_feed_prices_are_major_unit_strings(live):
-    variants = [v for p in mcp["stocked_collection"]["products"] for v in p["variants"]]
+def test_feed_prices_are_major_unit_strings(storefront):
+    variants = [v for p in storefront["stocked_collection"]["products"] for v in p["variants"]]
     assert variants
     for v in variants[:20]:
         assert isinstance(v["price"], str), (

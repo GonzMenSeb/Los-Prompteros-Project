@@ -117,6 +117,9 @@ RAIL_MUTED = "#A9AFD8"
 RAIL_GUARDRAIL = "#9AA3F5"
 RAIL_DANGER = "#FF8B96"
 RAIL_LINE = "rgba(232,234,247,0.10)"
+# The copy-run control reports success on the rail. SUCCESS is 3.74:1 there and
+# MUTED is 3.5:1 — both under AA once the panel went dark. 9.81:1.
+RAIL_SUCCESS = "#5BD9A0"
 
 LEVEL_COLOR = {"info": RAIL_MUTED, "guardrail": RAIL_GUARDRAIL, "error": RAIL_DANGER}
 LEVEL_BG = {

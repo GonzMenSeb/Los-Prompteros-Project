@@ -1,7 +1,7 @@
 import reflex as rx
 
 from concierge.state import FIXTURE_MODE, State
-from concierge.ui import brand, cart, chat, product, trace_panel, walkthrough
+from concierge.ui import brand, cart, chat, gate, product, trace_panel, walkthrough
 from concierge.ui.theme import (  # noqa: F401
     ACCENT,
     ACCENT_DIM,
@@ -163,6 +163,10 @@ def skip_link() -> rx.Component:
 
 
 def index() -> rx.Component:
+    return rx.cond(State.unlocked, app_shell(), gate.screen())
+
+
+def app_shell() -> rx.Component:
     return rx.box(
         skip_link(),
         # The only h1 on the page. The empty state's heading used to be it, and it
