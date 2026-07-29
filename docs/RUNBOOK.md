@@ -51,6 +51,16 @@ It prints the **judge URL**. Then:
 
 Bring both tunnels up **once, early**, and leave them running.
 
+### The hosted instance is the fallback, and the link that outlives the day
+
+**https://decabot.web.vespiridion.org** — same app, permanent URL, one shared password
+(`vault_decabot_password` in `vps-infrastructure/vault.yml`). It does not move when a
+tunnel restarts, so it is what a judge or a recruiter can open next week.
+
+Tunnels stay the demo-day primary: no VPS in the path, no DNS, and no password to read
+out on camera. Use the hosted URL if the tunnels will not come up, and hand it out
+afterwards either way. Full detail in [`DEPLOY.md`](DEPLOY.md).
+
 | | URL |
 |---|---|
 | Backend (`:8000`) | ________________________________ |

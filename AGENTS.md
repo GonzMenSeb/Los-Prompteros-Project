@@ -179,6 +179,46 @@ Re-measured **25 Jul 2026**, and the numbers moved. `SPEC.md §3.2` and
   moves the frontend and desyncs the tunnel.
 - `cors_allowed_origins` defaults to `("*",)`, so CORS needs no work.
 
+### Container deployment  (`Dockerfile`, hosted at `decabot.web.vespiridion.org`)
+
+Executed against the live host on **28 Jul 2026**. The Reflex/serving entries above
+describe `reflex run` in DEV and remain correct there — **everything here is about
+`--env prod`, where the port and `api_url` rules genuinely differ.** Neither section
+overrides the other; check which mode you are in first.
+
+- **PROD IS ONE PORT.** `_run` errors with *"In production, frontend and backend must run
+  on the same port"* if they differ, and `_run_prod` mounts the compiled frontend onto the
+  backend's own ASGI app. So `8000` serves the page **and** `/_event`. The
+  "Reflex needs two ports … both must be publicly tunnelled" entry above is a **dev/tunnel**
+  fact. `--single-port` exists as a CLI flag and is **never forwarded to `_run`** — it is a
+  no-op in 0.9.7; prod is already single-port.
+- **`api_url` must stay `http://localhost:8000` in the image.** `state.js`
+  `getBackendURL()` rewrites any `SAME_DOMAIN_HOSTNAMES` host — `localhost`, `0.0.0.0`,
+  `::` — to `window.location.hostname`, upgrades `ws:`→`wss:` and **clears the port** when
+  the page is https. Baking the real hostname in would need one image per domain and buys
+  nothing. **This is why the image is domain-agnostic. Do not "fix" it to the public URL.**
+- **`REFLEX_SKIP_COMPILE` and `REFLEX_MOUNT_FRONTEND_COMPILED_APP` are declared
+  `internal=True`, which prefixes the real env var with `__`.** `__REFLEX_SKIP_COMPILE`,
+  `__REFLEX_MOUNT_FRONTEND_COMPILED_APP`. Without the underscores they are silently ignored.
+- **`.web/backend/stateful_pages.json` must be copied into the runtime image.**
+  `compile_app()` takes a no-write fast path only when that marker already exists;
+  otherwise a skip-compile boot still tries to *create* `.web/backend` and dies with
+  `PermissionError` as the non-root user. `[]` is the correct content for this app.
+- Static frontend lives at **`.web/build/client`** (`Dirs.STATIC = build/client`).
+- **Granian, not uvicorn.** Reflex ships granian and no uvicorn/gunicorn, so
+  `should_use_granian()` is what its own prod path takes. `get_num_workers()` returns
+  **1** without Redis — which is what keeps `_SESSIONS` and the `_public_gate` semaphore
+  (both process-local) correct. **Do not add Redis or raise the worker count** without
+  moving those out of module scope.
+- `state_manager_mode` is **DISK**, so `./.states` must be writable by the container user.
+- **Zot rejects Docker v2 manifests with `415`.** It accepts OCI only, so a plain
+  `docker push` fails at the manifest step with `manifest invalid` *after* every layer
+  uploads successfully. Push with
+  `docker buildx build --provenance=false --sbom=false --output type=image,oci-mediatypes=true,push=true`.
+- **A WebSocket probe must force `--http1.1`.** Traefik negotiates h2 with curl, and
+  `Connection: Upgrade` is an HTTP/1.1 mechanism, so over h2 granian answers
+  `400 Invalid websocket upgrade` on a completely healthy app.
+
 ## Module boundaries — enforced socially, and worth it
 
 - **Nothing calls the MCP endpoint except `concierge/commerce/ucp.py`.**
@@ -226,6 +266,7 @@ reasoning.
 | `rxconfig.py` | recompile the frontend; note the new URL in `docs/RUNBOOK.md` |
 | the build's state | tick it off in `docs/HANDOFF.md` — another agent resumes from there |
 | an architectural choice | append to `docs/DECISIONS.md` — never edit a past entry |
+| `Dockerfile` or anything the container reads | rebuild, re-push, redeploy per `docs/DEPLOY.md` |
 
 **PR checklist:** facts registry still accurate · `make check` green · `make verify`
 green if `commerce/` changed · `DECISIONS.md` appended if architectural.
@@ -236,6 +277,7 @@ green if `commerce/` changed · `DECISIONS.md` appended if architectural.
 |---|---|
 | [`SPEC.md`](SPEC.md) | Full technical specification. Cited by section number throughout the code. |
 | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Demo-day sequence and contingencies. |
+| [`docs/DEPLOY.md`](docs/DEPLOY.md) | The hosted instance: how to ship a change, rotate the password, verify. |
 | [`docs/HANDOFF.md`](docs/HANDOFF.md) | State of the build — resume from this file alone. |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Append-only architectural log. |
 | [`docs/research/`](docs/research/) | **Archived pre-build research. Outranked by this file.** |

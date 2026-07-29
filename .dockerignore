@@ -1,0 +1,10 @@
+*
+!requirements.txt
+!rxconfig.py
+!concierge/
+!assets/
+!reflex.lock/
+
+assets/external/
+**/__pycache__/
+**/*.py[cod]

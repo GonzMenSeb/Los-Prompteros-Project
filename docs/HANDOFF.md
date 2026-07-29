@@ -70,6 +70,15 @@ pattern matches the invoking shell's own command line and kills the caller.
       declarations, client-side history, call counters.
 - [x] **Guardrails lane.** `domain/guardrails.py` + 131 offline tests green.
 - [x] **UI lane.** Chat, product cards, kit summary, trace panel, cart confirm.
+- [x] **Password gate.** One shared password, no username, branded full-page lock.
+      Enforced server-side in every handler that spends a call, not by `rx.cond`.
+      `DECABOT_PASSWORD` unset = gate off, so local dev and `make walkthrough` are
+      untouched. `unlocked` defaults to a literal `False` because a state var's
+      default is compiled into the bundle — see `AGENTS.md`.
+- [x] **Hosted deployment.** `Dockerfile` (prod = one port), Ansible role `decabot`
+      in `vps-infrastructure`, live at **https://decabot.web.vespiridion.org** on
+      Traefik + Let's Encrypt. Websocket upgrade and a live Gemini turn both verified
+      through TLS from outside the box. See [`DEPLOY.md`](DEPLOY.md).
 - [x] **End-to-end, CLI.** Santurbán prompt → grounded research (3,000–4,290 m,
       sub-zero lows) → `ActivityProfile` → 8 slots → live products → sizes
       resolved → **real cart, 5 lines, $1,004.98**.

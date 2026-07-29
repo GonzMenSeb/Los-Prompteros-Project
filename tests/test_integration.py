@@ -668,3 +668,113 @@ class TestReconnectDoesNotRestartTheWalkthrough:
         state.walkthrough_stage = 2
         state.clear()
         assert state.walkthrough_stage == 0
+
+
+class TestPasswordGate:
+    """The app is on a public URL. What the gate protects is the Gemini quota and
+    Decathlon's rate limiter — a lockout is ~48 minutes for everybody, us included."""
+
+    def test_the_gate_is_off_when_no_password_is_configured(self):
+        """Unset DECABOT_PASSWORD must leave local dev, `make walkthrough` and this
+        suite untouched — the same fail-open reasoning as CONCIERGE_VIP_TOKEN."""
+        state_mod = _mod("concierge.state")
+        assert state_mod.GATE_ON is False
+        assert state_mod._GATE_DIGEST == ""
+
+    def test_unlocked_defaults_to_false_regardless_of_configuration(self):
+        """A state var's default is compiled INTO the frontend bundle, and the image is
+        built without DECABOT_PASSWORD set. `not GATE_ON` therefore baked in as True and
+        served the unlocked app shell to any browser whose websocket never connected."""
+        import inspect
+
+        state_mod = _mod("concierge.state")
+        assert state_mod.State(_reflex_internal_init=True).unlocked is False
+        src = inspect.getsource(state_mod.State)
+        assert "unlocked: bool = False" in src, (
+            "the default must be a literal False, never derived from GATE_ON"
+        )
+
+    def test_on_page_load_opens_the_gate_when_it_is_off(self):
+        """Because the default is now hard False, something has to open it."""
+        import inspect
+
+        state_mod = _mod("concierge.state")
+        src = inspect.getsource(getattr(state_mod.State.on_page_load, "fn", state_mod.State.on_page_load))
+        assert "if not GATE_ON:" in src and "self.unlocked = True" in src
+
+    def test_every_spending_handler_rechecks_the_gate(self):
+        """Conditional rendering is not a guard: the events are callable over the wire
+        whatever is on screen. Same reasoning as confirm_cart's own re-check.
+
+        The guard must be `GATE_ON and not self.unlocked`, never a bare
+        `not self.unlocked`. scripts/verify_walkthrough.py and verify_ui.py call these
+        handlers directly with no browser, so on_page_load never runs to open the gate —
+        the bare form made `make rehearse` return instantly and assert nothing, which
+        `make check` cannot see because the walkthrough is a live path."""
+        import inspect
+
+        state_mod = _mod("concierge.state")
+        for name in ("send_message", "confirm_cart", "run_walkthrough"):
+            handler = getattr(state_mod.State, name)
+            src = inspect.getsource(getattr(handler, "fn", handler))
+            assert "GATE_ON and not self.unlocked" in src, (
+                f"{name} must guard on `GATE_ON and not self.unlocked`; the bare\n"
+                "  `not self.unlocked` silently disables the headless verify scripts"
+            )
+
+    async def test_the_right_password_unlocks_and_the_wrong_one_does_not(self, monkeypatch):
+        import hashlib
+
+        state_mod = _mod("concierge.state")
+        password = "correct horse battery staple"
+        digest = hashlib.sha256(b"decabot.gate.v1:" + password.encode()).hexdigest()
+        monkeypatch.setattr(state_mod, "GATE_ON", True)
+        monkeypatch.setattr(state_mod, "GATE_PASSWORD", password)
+        monkeypatch.setattr(state_mod, "_GATE_DIGEST", digest)
+        monkeypatch.setattr(state_mod, "_GATE_DELAY", 0)
+        unlock = getattr(state_mod.State.unlock, "fn", state_mod.State.unlock)
+
+        state = state_mod.State(_reflex_internal_init=True)
+        state.unlocked = False
+        async for _ in unlock(state, {"password": "nope"}):
+            pass
+        assert state.unlocked is False
+        assert state.gate_error != ""
+        assert state.gate_key == ""
+
+        state.unlocked = False
+        async for _ in unlock(state, {"password": password}):
+            pass
+        assert state.unlocked is True
+        # The cookie carries a digest, never the password itself.
+        assert state.gate_key == digest
+        assert password not in state.gate_key
+
+    def test_clear_does_not_relock_the_app(self):
+        """`Start over` resets the conversation, not the visitor's admission."""
+        state_mod = _mod("concierge.state")
+        state = state_mod.State(_reflex_internal_init=True)
+        state.unlocked = True
+        state.clear()
+        assert state.unlocked is True
+
+    async def test_the_headless_verify_scripts_still_get_past_the_gate(self, monkeypatch):
+        """`make rehearse` drives run_walkthrough with no browser, so on_page_load never
+        runs. Behavioural companion to the source assertion above: with the gate off, a
+        never-unlocked State must still enter the script rather than return silently.
+
+        The single beat is a cart beat with no standing offer, which run_walkthrough
+        handles by setting `error` — so this asserts the guard, not the network."""
+        state_mod = _mod("concierge.state")
+        wt = _mod("concierge.walkthrough")
+        beat = wt.Beat(phase="onstage", label="probe", shows="the guard", message=wt.CART_BEAT)
+        monkeypatch.setattr(wt, "beats", lambda phase=None: [beat])
+        assert state_mod.GATE_ON is False
+
+        state = state_mod.State(_reflex_internal_init=True)
+        assert state.unlocked is False, "the client-facing default must stay fail-closed"
+        async for _ in state.run_walkthrough("onstage"):
+            pass
+
+        assert state.walkthrough_stage == 2, "run_walkthrough returned without running"
+        assert "never built" in state.error

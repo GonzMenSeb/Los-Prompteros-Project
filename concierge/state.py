@@ -13,6 +13,8 @@ Two things here are load-bearing and look like over-engineering:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -56,6 +58,20 @@ VIP_TOKEN = os.environ.get("CONCIERGE_VIP_TOKEN", "")
 PUBLIC_SLOTS = max(1, int(os.environ.get("CONCIERGE_PUBLIC_SLOTS", "3")))
 
 _public_gate = asyncio.Semaphore(PUBLIC_SLOTS)
+
+# One shared password, no username: on a public URL what needs protecting is the Gemini
+# quota and Decathlon's rate limiter, not per-visitor data. UNSET MEANS NO GATE, which is
+# what leaves local dev, `make walkthrough` and the test suite untouched.
+GATE_PASSWORD = os.environ.get("DECABOT_PASSWORD", "")
+GATE_ON = bool(GATE_PASSWORD)
+# What a returning browser presents instead of retyping. Producing it requires the
+# password, so restoring `unlocked` from the cookie is a real server-side check rather
+# than trusting a client-set flag.
+_GATE_DIGEST = (
+    hashlib.sha256(b"decabot.gate.v1:" + GATE_PASSWORD.encode()).hexdigest() if GATE_ON else ""
+)
+# A shared short password's only real defence is making each guess cost something.
+_GATE_DELAY = 0.6
 
 _SESSIONS: dict[str, Any] = {}
 
@@ -166,6 +182,28 @@ class State(rx.State):
     error: str = ""
 
     is_vip: bool = False
+
+    # Every handler that spends a Gemini call or touches Decathlon re-checks this, as
+    # `GATE_ON and not self.unlocked`. Conditional rendering is not a guard — the events
+    # are callable over the wire whatever is on screen — exactly the reasoning behind
+    # `confirm_cart` above.
+    #
+    # The `GATE_ON and` half is not redundant. `scripts/verify_walkthrough.py` and
+    # `verify_ui.py` drive these handlers directly with no browser, so `on_page_load`
+    # never runs and never opens the gate: a bare `not self.unlocked` turned
+    # `make rehearse` into a silent no-op that asserted nothing.
+    #
+    # False unconditionally, NOT `not GATE_ON`. A state var's default is compiled INTO
+    # the frontend bundle, and the image is built without DECABOT_PASSWORD set, so
+    # `not GATE_ON` baked in as True: a browser that never completed the websocket
+    # handshake was served the unlocked app shell. `on_page_load` opens the gate when
+    # it is off, so the only thing this default decides is what an unhydrated page
+    # shows — and that has to be the lock.
+    unlocked: bool = False
+    gate_error: str = ""
+    gate_busy: bool = False
+    gate_reveal: bool = False
+    gate_key: str = rx.Cookie(name="decabot_gate", max_age=60 * 60 * 24 * 30, same_site="lax")
 
     walkthrough_phase: str = ""
     # How far the two-step script has got: 0 nothing run, 1 prewarmed, 2 finished.
@@ -279,8 +317,36 @@ class State(rx.State):
         self.cart_line_count = cart.line_count
         self.cart_expires_at = cart.expires_at or ""
 
+    @rx.var
+    def gate_on(self) -> bool:
+        return GATE_ON
+
     def toggle_trace(self):
         self.show_trace = not self.show_trace
+
+    def toggle_reveal(self):
+        self.gate_reveal = not self.gate_reveal
+
+    @rx.event
+    async def unlock(self, form_data: dict[str, Any]):
+        if not GATE_ON or self.unlocked or self.gate_busy:
+            return
+
+        self.gate_busy = True
+        self.gate_error = ""
+        yield
+
+        await asyncio.sleep(_GATE_DELAY)
+        if hmac.compare_digest((form_data.get("password") or "").strip(), GATE_PASSWORD):
+            self.unlocked = True
+            self.gate_key = _GATE_DIGEST
+            emit("gate.unlocked", {}, level="guardrail")
+        else:
+            self.gate_error = "That is not the password."
+            emit("gate.refused", {}, level="guardrail")
+
+        self.gate_busy = False
+        yield
 
     def clear(self):
         _reset_session(self.router.session.client_token)
@@ -306,7 +372,7 @@ class State(rx.State):
     @rx.event
     async def send_message(self, form_data: dict[str, Any]):
         text = (form_data.get("message") or self.draft or "").strip()
-        if not text or self.is_thinking:
+        if not text or self.is_thinking or (GATE_ON and not self.unlocked):
             return
 
         self.draft = ""
@@ -442,6 +508,8 @@ class State(rx.State):
     async def confirm_cart(self):
         if not self.awaiting_confirmation or not self.kit_items or self.is_thinking:
             return
+        if GATE_ON and not self.unlocked:
+            return
 
         self.awaiting_confirmation = False
         self.is_thinking = True
@@ -506,6 +574,11 @@ class State(rx.State):
         `router.url.query_parameters` — `router.page` is deprecated in 0.9.x and slated
         for removal in 1.0.
         """
+        if not GATE_ON:
+            self.unlocked = True
+        elif not self.unlocked and hmac.compare_digest(self.gate_key, _GATE_DIGEST):
+            self.unlocked = True
+
         params = self.router.url.query_parameters
         if VIP_TOKEN and params.get("vip", "") == VIP_TOKEN:
             self.is_vip = True
@@ -533,7 +606,7 @@ class State(rx.State):
         script and the prewarm start from a clean slate — "onstage" deliberately keeps
         the kit the prewarm built, because that kit IS the thing being probed.
         """
-        if self.is_thinking or self.walkthrough_phase:
+        if self.is_thinking or self.walkthrough_phase or (GATE_ON and not self.unlocked):
             return
 
         script = walkthrough.beats(phase or None)

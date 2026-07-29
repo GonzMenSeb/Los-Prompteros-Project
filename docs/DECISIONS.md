@@ -196,3 +196,45 @@ previous entry no longer applies: MIT asks nothing of anyone who deploys a fork.
 
 Leaving the AGPL entry above in place rather than deleting it, per the append-only rule.
 A later reader should be able to see that AGPL was considered and why it was dropped.
+
+### 2026-07-28 · Hosted permanently at decabot.web.vespiridion.org, behind an in-app password
+
+The demo was tunnel-only: `make tunnel` mints two Cloudflare quick-tunnel URLs per run,
+and `api_url` is compiled into the frontend bundle, so every restart invalidated any QR
+code already in the wild. That is fine for a rehearsal and bad for anything a judge or a
+recruiter might open a week later. It now also runs as a container on the team's own VPS
+under Ansible management (`vps-infrastructure`, role `decabot`), on the same Traefik +
+Let's Encrypt plane as the other services there. The tunnel path is untouched and stays
+the demo-day primary — it needs no VPS and no DNS propagation.
+
+**One port, not two.** Reflex needs two in dev (frontend 3000, backend 8000), which is
+why `make tunnel` has to tunnel both. In `--env prod` it mounts the compiled frontend
+onto the backend's own ASGI app, so a single 8000 serves the page *and* the `/_event`
+websocket. That collapses the two-tunnel problem into one Traefik router with no
+path-based split to get wrong.
+
+**`api_url` stays at `http://localhost:8000` in the image, on purpose.** The compiled
+bundle rewrites any `SAME_DOMAIN_HOSTNAMES` value — localhost, 0.0.0.0, :: — to whatever
+origin actually served the page, upgrading `http`→`https` and `ws`→`wss` and dropping the
+port. So the registry's "api_url is compiled INTO the bundle" fact still holds exactly as
+written; it just means the *correct* baked value for a reverse-proxied deployment is
+localhost, and the image carries no domain and needs no rebuild to move hosts.
+
+**Auth is a password gate in the app, not Traefik basicauth.** The thing being protected
+is the Gemini quota and Decathlon's MCP rate limiter — a lockout is ~48 minutes — not
+per-visitor data, so a shared password is the right shape and a username would be
+theatre. Traefik's basicauth was the cheaper build and was rejected: a browser credential
+dialog cannot be styled, and the URL has to be handable to a judge with nothing to
+explain but one password. The gate is enforced in Python inside every handler that spends
+a call, per the guardrail principle — `rx.cond` decides what renders, and renders nothing
+that isn't also refused server-side.
+
+`unlocked` defaults to a literal `False` rather than `not GATE_ON`. A state var's default
+is compiled into the bundle and the image is built with no password set, so the derived
+version baked in as `True` and served the unlocked app shell to any browser whose
+websocket never completed. Fail-closed is the only safe direction for a default that
+ships to the client.
+
+Rejected: building the frontend at container start. It would let one image serve any
+`api_url`, at the cost of bun plus 277 MB of `node_modules` in the runtime image and a
+multi-minute boot before the first request. The rewrite above makes it unnecessary.
