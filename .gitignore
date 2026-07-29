@@ -15,7 +15,8 @@ venv/
 # Reflex build output and session state
 .web/
 .states/
-reflex.lock/
+# reflex.lock/ is NOT ignored: the Dockerfile COPYs it and .dockerignore
+# un-ignores it, so a clean clone cannot build the image without it.
 *.db
 
 # Vendored binaries — fetched by `make setup`, never committed

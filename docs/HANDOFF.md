@@ -92,6 +92,17 @@ pattern matches the invoking shell's own command line and kills the caller.
       in `vps-infrastructure`, live at **https://decabot.web.vespiridion.org** on
       Traefik + Let's Encrypt. Websocket upgrade and a live Gemini turn both verified
       through TLS from outside the box. See [`DEPLOY.md`](DEPLOY.md).
+- [x] **CI/CD, 29 Jul.** Merging to `main` now tests, builds, pushes, deploys and
+      health-checks by itself — Jenkins job `decabot-deploy`, pipeline in
+      [`../infra/jenkins/Jenkinsfile`](../infra/jenkins/Jenkinsfile). Pull requests get
+      the offline suite from GitHub Actions. **Do not deploy by hand any more**; the
+      manual commands are still in [`DEPLOY.md`](DEPLOY.md) as the Jenkins-is-down path.
+      Built because a merged fix sat undeployed for a day and the only way to notice was
+      that a bug report's traceback named an exception class the shipped code cannot
+      raise. Every image is now tagged with its git SHA and labelled
+      `org.opencontainers.image.revision`, so **which commit is live is a
+      `docker inspect` away** — ask it before believing a bug report.
+      Docs-only merges build nothing and leave the running instance alone.
 - [x] **End-to-end, CLI.** Santurbán prompt → grounded research (3,000–4,290 m,
       sub-zero lows) → `ActivityProfile` → 8 slots → live products → sizes
       resolved → **real cart, 5 lines, $1,004.98**.
