@@ -1321,6 +1321,34 @@ class TestTheFirstTimerPolish:
 
         assert {q.key for q in check_open_questions(kit, party, said)} == expected
 
+    def test_one_person_is_not_handed_a_mens_and_a_womens_of_the_same_thing(self):
+        """Observed live: a party of ONE got a Women's cycling jacket and a Men's base
+        layer. Retrieval guarantees the products are real, not that they are for the
+        same person. It asks rather than dropping one — a title match is not worth
+        throwing away a good product over."""
+        from concierge.domain.guardrails import check_open_questions
+        from concierge.domain.models import Kit
+        from tests.conftest import item as make_item
+
+        mixed = [
+            make_item(product_title="Van Rysel Women's Ultralight Waterproof Cycling Jacket"),
+            make_item(product_title="Van Rysel Men's Ultralight Mesh Base Layer"),
+        ]
+        said = "bike commuting, 1500 usd, I have no clothes for that"
+        kit = Kit(items=mixed, unservable_slots=[], budget_minor=90_000)
+
+        assert "gendered_mix" in {q.key for q in check_open_questions(kit, 1, said)}
+        # Two people legitimately split across a men's and a women's line.
+        assert "gendered_mix" not in {q.key for q in check_open_questions(kit, 2, said)}
+
+    def test_the_womens_pattern_does_not_trigger_the_mens_one(self):
+        """"Women's" contains "men's". The word boundary is the whole defence."""
+        from concierge.domain.guardrails import _MENS, _WOMENS
+
+        assert not _MENS.search("Van Rysel Women's Ultralight Jacket")
+        assert _WOMENS.search("Van Rysel Women's Ultralight Jacket")
+        assert _MENS.search("Van Rysel Men's Mesh Base Layer")
+
     def test_an_answered_question_stops_being_asked(self):
         """The point of deriving these every turn instead of re-running the question
         stage: they go away by themselves, so a standing offer never becomes a nag."""
@@ -1341,6 +1369,41 @@ class TestTheFirstTimerPolish:
 
         keys = {q.key for q in check_open_questions(Kit(items=[], unservable_slots=[]), 1, "hiking")}
         assert keys == {"party_size"}, "no kit means no budget or duplicate to talk about"
+
+    async def test_serving_stubs_without_choosing_them_is_an_error_not_a_default(self):
+        """AGENTS.md calls serving stubs while claiming to be live "the one failure that
+        would invalidate the whole demo". It was the SILENT default: forget
+        set_backend(catalog) and the loop builds a kit out of fixture data."""
+        tools = _mod("concierge.agent.tools")
+        from concierge.obs.trace import recent
+
+        tools._bind(tools.stubs, chosen=False)
+        await tools.backend().get_taxonomy()
+        assert any(e.event == "guardrail.backend_not_chosen" for e in recent(30))
+
+        tools.set_backend(tools.stubs)
+        assert any(e.event == "tools.backend" for e in recent(10))
+
+    def test_choosing_a_backend_is_announced_and_defaulting_to_one_is_not(self):
+        """The import-time bind used to emit, which put a `backend=…stubs` line at the
+        head of every live run and made a real choice indistinguishable from a fallback."""
+        import inspect
+
+        tools = _mod("concierge.agent.tools")
+        src = inspect.getsource(tools._bind)
+        assert "if not chosen:" in src and "return" in src
+
+    def test_a_citation_can_always_be_read_and_placed(self):
+        """The href is a vertexaisearch redirect, so without a label the customer cannot
+        see where a link goes. Gemini gives `domain` when it has no page title."""
+        loop = _mod("concierge.agent.loop")
+
+        assert loop.Citation(uri="https://x/redirect", title="", domain="wikipedia.org").domain
+        # The UI must render the domain, not just the title.
+        import inspect
+
+        chat = _mod("concierge.ui.chat")
+        assert "c.domain" in inspect.getsource(chat.citation_link)
 
     def test_the_asks_reach_the_page_not_just_the_prose(self):
         """Prose scrolls away — the same reason the size ask got its own control."""

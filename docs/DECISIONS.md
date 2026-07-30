@@ -847,3 +847,30 @@ party size from the kit's own person ordinals.
 
 The asks also reach the confirm bar, not just the prose — same reasoning as the size
 ask before them: prose scrolls away and the button that spends money does not.
+
+### 2026-07-29 · The last three from the live bundle: ask, do not guess; fail loudly, not silently
+
+Three items noted in the run bundle and left unfixed because none had an obvious safe
+answer. All three turned out to have one.
+
+**A party of one was handed a Women's cycling jacket and a Men's base layer.** Retrieval
+guarantees the products are REAL; nothing guaranteed they were for the same person. The
+tempting fix — drop the odd one out on a title match — throws away a good product over a
+word, so this became an open question instead: it asks, and the ask disappears when the
+kit stops being mixed. `\b` is the whole defence in the matcher, because "Women's"
+contains "men's"; there is a test for exactly that.
+
+**`set_backend(stubs)` ran at module import and emitted.** So every live run opened with
+`tools.backend backend=concierge.agent.stubs`, and a real decision was indistinguishable
+in the trace from a fallback nobody chose. Worse, the fallback was SILENT: forget
+`set_backend(catalog)` and the loop builds a kit out of fixture data while claiming to be
+live — which `AGENTS.md` calls the one failure that would invalidate the demo. The
+fallback stays, because tests and scripts rely on it, but it no longer announces itself
+as a choice, and using it without choosing it now emits `guardrail.backend_not_chosen` at
+error level the first time a tool actually serves data.
+
+**Citations rendered as opaque `vertexaisearch` redirects.** `GroundingChunkWeb` carries
+a `domain` alongside `title`, and it was being dropped. The title now falls back to the
+domain rather than to an empty chip, and the domain renders beside it — the `href` is a
+redirect, so naming the destination is the only way a customer can see where a link goes
+before clicking it. That is a trust fix, not decoration.

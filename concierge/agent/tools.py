@@ -25,6 +25,13 @@ MAX_SIZES = 12
 MAX_SUGGESTIONS = 15
 
 _backend: Any = stubs
+# Serving stubs while claiming to be live is the one failure AGENTS.md says would
+# invalidate the demo, and until now it was the SILENT default: forget
+# `set_backend(catalog)` and the loop happily builds a kit out of fixture data. The
+# fallback stays — tests and scripts rely on it — but using it without choosing it is
+# now an error in the audit rail rather than nothing at all.
+_chosen = False
+_warned = False
 
 # Products the model has actually been shown, keyed by product handle. KitItems
 # are built from this, never from model prose — that is the anti-hallucination
@@ -70,6 +77,17 @@ class _Adapter:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._impl, name)
 
+    def _ensure_chosen(self) -> None:
+        global _warned
+        if _chosen or _warned:
+            return
+        _warned = True
+        emit(
+            "guardrail.backend_not_chosen",
+            {"serving": getattr(self._impl, "__name__", type(self._impl).__name__)},
+            level="error",
+        )
+
     def resolves_none_itself(self) -> bool:
         return self._fn["resolve_variant"].__name__ == "try_resolve_variant"
 
@@ -81,9 +99,11 @@ class _Adapter:
             fn(sink)
 
     async def get_taxonomy(self) -> list[dict[str, str]]:
+        self._ensure_chosen()
         return await self._fn["get_taxonomy"]()
 
     async def get_collection(self, handle: str, limit: int = 12) -> list[CatalogProduct]:
+        self._ensure_chosen()
         try:
             return await self._fn["get_collection"](handle, limit)
         except Exception as exc:
@@ -94,9 +114,11 @@ class _Adapter:
             return []
 
     async def search_catalog(self, query: str, limit: int = 10) -> list[CatalogProduct]:
+        self._ensure_chosen()
         return await self._fn["search_catalog"](query, limit)
 
     async def resolve_variant(self, product: CatalogProduct, requested_size: str | None = None) -> Any:
+        self._ensure_chosen()
         try:
             return await self._fn["resolve_variant"](product, requested_size)
         except Exception as exc:
@@ -105,18 +127,24 @@ class _Adapter:
             return None
 
 
-def set_backend(module_or_obj: Any) -> None:
-    global _backend
-    adapter = _Adapter(module_or_obj)
-    _backend = adapter
+def _bind(module_or_obj: Any, *, chosen: bool) -> None:
+    global _backend, _chosen, _warned
+    _backend = _Adapter(module_or_obj)
+    _chosen, _warned = chosen, False
+    if not chosen:
+        return
     emit(
         "tools.backend",
         {
             "backend": getattr(module_or_obj, "__name__", type(module_or_obj).__name__),
-            "resolve": adapter._fn["resolve_variant"].__name__,
-            "search": adapter._fn["search_catalog"].__name__,
+            "resolve": _backend._fn["resolve_variant"].__name__,
+            "search": _backend._fn["search_catalog"].__name__,
         },
     )
+
+
+def set_backend(module_or_obj: Any) -> None:
+    _bind(module_or_obj, chosen=True)
 
 
 def backend() -> Any:
@@ -304,4 +332,8 @@ DISPATCH: dict[str, Callable[..., Awaitable[dict[str, Any]]]] = {
 }
 
 # Wrapped, not bare, so importing tools.py without loop.py still gets the adapter.
-set_backend(stubs)
+# `chosen=False`: this is a fallback nobody asked for, so it does not announce itself as
+# a decision in the trace, and `_ensure_chosen` will say so loudly if a tool ever runs
+# against it. The import-time emit is what put a `tools.backend backend=…stubs` line at
+# the head of every live run.
+_bind(stubs, chosen=False)
