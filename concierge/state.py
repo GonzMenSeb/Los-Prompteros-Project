@@ -687,6 +687,9 @@ class State(rx.State):
         # so sleeping to clear a badge would serialize that session's other events.
         self._reset_copy()
         self.open_asks = []
+        # Sending a message is an implicit Keep. Left standing, the header sits in
+        # Erase/Keep over a run the customer has since added to.
+        self.confirming_clear = False
         self.messages.append(ChatMessage(role="user", content=text))
         self.is_thinking = True
         self.status = "Reading the conditions…"
