@@ -873,11 +873,14 @@ async def run_turn(user_message: str, session: ConversationSession) -> TurnResul
                 result.citations = session.citations
                 result.offer_cart = bool(session.kit.items)
                 result.stage = "kit"
+                # On the result, not just in the prose: this path leaves the confirm bar
+                # standing, and state reads the asks off the result for it.
+                result.open_questions = _open_questions(session, session.kit)
                 result.text = (
                     "That message tried to override my instructions, so I've ignored it — I can't hand "
                     "out free or discounted items, and nothing here has changed.\n\nThis is the same kit "
                     "as before, at the same prices. Tell me what you'd actually like to adjust.\n\n"
-                    + _disclosures(session.kit, session.unchecked_slots, _open_questions(session, session.kit))
+                    + _disclosures(session.kit, session.unchecked_slots, result.open_questions)
                 )
             elif session.profile is not None:
                 result = await _continue(session, session.trip_message, result)
