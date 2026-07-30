@@ -882,3 +882,11 @@ stopped disclosing what it assumed. It falls back to `_refresh_open_asks`.
 **The fixture emitted its guardrail event after the last drain of the turn**, so
 `guardrail.open_questions` never reached the trace panel in the mode that runs on stage.
 `_fixture_resize` drains after its own emits; `_fixture_turn` did not.
+
+A third, found by re-checking a claim rather than a line of code: the **injection reply
+computed the asks and threw them away.** It sets `result.kit = session.kit` and
+`offer_cart`, so it is a kit turn with the confirm bar standing — but it passed
+`_open_questions(...)` straight into `_disclosures` without ever assigning
+`result.open_questions`, which `_live_turn` is what reads. The prose listed all three
+assumptions and the button that spends money listed none. Assigned once and reused, so
+the two cannot drift apart again.
