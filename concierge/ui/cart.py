@@ -86,6 +86,36 @@ def _stat(label: str, value, color: str = TEXT) -> rx.Component:
     )
 
 
+def open_asks() -> rx.Component:
+    """What the kit is still ASSUMING about you, beside the button that spends money.
+
+    The question stage runs once and latches, so anything unanswered was assumed
+    silently and forever. These are derived from data every turn and disappear the
+    moment the answer arrives, which is what keeps a standing offer from becoming a
+    nag. Sizes have their own control above — this is the rest."""
+    return rx.cond(
+        State.has_open_asks,
+        rx.vstack(
+            rx.foreach(
+                State.open_asks,
+                lambda ask: rx.hstack(
+                    rx.icon("circle-help", size=14, color=BRAND, flex_shrink="0"),
+                    rx.text(ask, size="1", color=TEXT, line_height="1.5"),
+                    spacing="2",
+                    align="start",
+                    width="100%",
+                ),
+            ),
+            spacing="1",
+            width="100%",
+            padding="0.7rem 0.85rem",
+            background=TINT_1,
+            border=f"1px solid {TINT_3}",
+            border_radius=RADIUS_SM,
+        ),
+    )
+
+
 def confirm_bar() -> rx.Component:
     return rx.cond(
         State.awaiting_confirmation & ~State.has_cart,
@@ -135,6 +165,7 @@ def confirm_bar() -> rx.Component:
                     width="100%",
                 ),
             ),
+            open_asks(),
             rx.button(
                 rx.hstack(
                     rx.icon("shopping-cart", size=19),

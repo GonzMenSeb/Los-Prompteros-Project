@@ -811,3 +811,39 @@ Recorded because it corrects an earlier entry in this file: the "parsers are key
 English" finding was **already closed** when it was written up. `presupuesto`, `hasta`,
 `dólares` and `tallas?` were all present. It was written from reading the code once and
 not checked; checking it is what showed otherwise. Now pinned by tests so it stays true.
+
+### 2026-07-29 · Ask what is still unknown, every turn, and stop when it is answered
+
+The question stage runs once. `questions_asked` latches, and `QUESTION_PROMPT` says so
+in as many words: *"AT MOST 4 questions, all in this one turn. Never ask again later."*
+So a customer who answered two of four had the other two assumed, silently, forever.
+
+The obvious fix — let the model ask again — is the wrong shape twice over. It spends a
+model call to re-derive something already knowable, and a prompt instruction to ask
+"only if still missing" is a suggestion, which this project does not accept as a
+guardrail.
+
+`check_open_questions` is the deterministic version. It takes the kit, the party size,
+and **everything the customer typed**, and returns what is still being assumed. It runs
+on every turn that produces a kit, so an ask that is answered simply stops appearing —
+which is what keeps a standing offer from becoming a nag, without any state tracking
+which question was asked when.
+
+`party_size` is the one that needed the customer's own words rather than the model's
+output. `ActivityProfile.party_size` defaults to **1**, so an assumed 1 and a stated 1
+are byte-identical in the profile. The only evidence a default was chosen rather than
+defaulted is that they said so, hence the cue scan over `trip_message + answers`.
+
+Bias is deliberately toward silence: a loose match counts as ANSWERED. Under-asking is
+a smaller harm than pestering somebody who already replied. That is why the live
+bundle's *"I have no clothes for that"* closes the existing-kit question — it is an
+answer, and a stricter matcher would have gone on asking.
+
+Recorded because it is the same trap a teammate caught in `_STAGE_STATUS` earlier the
+same day, and I nearly walked into it again: **fixture mode never reaches `_continue`**,
+so wiring this only into the live path would have left it dead in exactly the mode that
+runs on stage without Gemini quota. `_refresh_open_asks` covers the fixture, deriving
+party size from the kit's own person ordinals.
+
+The asks also reach the confirm bar, not just the prose — same reasoning as the size
+ask before them: prose scrolls away and the button that spends money does not.

@@ -1295,19 +1295,65 @@ class TestTheFirstTimerPolish:
         src = inspect.getsource(loop.run_turn)
         assert "still good" in src, "the kit survives a budget stop; the text must say so"
 
-    def test_a_kit_with_no_budget_offers_the_way_to_set_one(self):
-        """The question stage runs once and never asks again, so an unanswered budget
-        used to be reported as a fact with no way out."""
+    @pytest.mark.parametrize(
+        "said,party,expected",
+        [
+            # The live bundle, turn 1: a bare trip description tells us nothing.
+            ("bike-commuting 8km each way in Medellín, rain included", 1,
+             {"budget", "party_size", "existing_kit"}),
+            # Same bundle, turn 2. "I have no clothes for that" IS an answer, and the
+            # budget parses now — so only the party is still being assumed.
+            ("1500 usd, I have no clothes for that, give me a recommendation", 1, {"party_size"}),
+            # The páramo fixture names a second person.
+            ("hiking to Páramo with my girlfriend, camping two nights", 2, {"budget", "existing_kit"}),
+            ("we are three, budget 900 dollars, we already own boots", 3, set()),
+        ],
+    )
+    def test_it_only_asks_what_this_customer_has_not_answered(self, said, party, expected):
+        """`party_size` defaults to 1, so an assumed 1 and a stated 1 are identical in
+        the model — the only evidence is what the customer typed."""
+        from concierge.domain.guardrails import check_open_questions
         from concierge.domain.models import Kit
-
-        loop = _mod("concierge.agent.loop")
         from tests.conftest import item as make_item
 
-        text = loop._disclosures(Kit(items=[make_item()], unservable_slots=[], budget_minor=None))
-        assert "haven't given me a budget" in text
+        budget = None if "budget" in expected else 90_000
+        kit = Kit(items=[make_item()], unservable_slots=[], budget_minor=budget)
 
-        priced = loop._disclosures(Kit(items=[make_item()], unservable_slots=[], budget_minor=90_000))
-        assert "haven't given me a budget" not in priced
+        assert {q.key for q in check_open_questions(kit, party, said)} == expected
+
+    def test_an_answered_question_stops_being_asked(self):
+        """The point of deriving these every turn instead of re-running the question
+        stage: they go away by themselves, so a standing offer never becomes a nag."""
+        from concierge.domain.guardrails import check_open_questions
+        from concierge.domain.models import Kit
+        from tests.conftest import item as make_item
+
+        kit = Kit(items=[make_item()], unservable_slots=[], budget_minor=None)
+        before = {q.key for q in check_open_questions(kit, 1, "two nights hiking")}
+        assert "party_size" in before
+
+        after = {q.key for q in check_open_questions(kit, 1, "two nights hiking with my wife")}
+        assert "party_size" not in after
+
+    def test_an_empty_kit_is_not_asked_about(self):
+        from concierge.domain.guardrails import check_open_questions
+        from concierge.domain.models import Kit
+
+        keys = {q.key for q in check_open_questions(Kit(items=[], unservable_slots=[]), 1, "hiking")}
+        assert keys == {"party_size"}, "no kit means no budget or duplicate to talk about"
+
+    def test_the_asks_reach_the_page_not_just_the_prose(self):
+        """Prose scrolls away — the same reason the size ask got its own control."""
+        from concierge.domain.guardrails import OpenQuestion
+
+        mod, state = self._state()
+        assert state.has_open_asks is False
+
+        state.open_asks = [OpenQuestion(key="budget", ask="say a budget").ask]
+        assert state.has_open_asks is True
+
+        state.clear()
+        assert state.open_asks == [], "a cleared session must not keep asking"
 
     @pytest.mark.parametrize(
         "text,expected",
