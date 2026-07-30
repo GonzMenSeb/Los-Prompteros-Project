@@ -92,6 +92,12 @@ def citation_link(c) -> rx.Component:
         rx.hstack(
             rx.icon("link", size=12, color=ACCENT),
             rx.text(c.title, size="1", color=ACCENT, weight="medium", no_of_lines=1),
+            # The href is a vertexaisearch redirect, so the destination is invisible
+            # until you land on it. Naming it is a trust fix, not decoration.
+            rx.cond(
+                c.domain != "",
+                rx.text(c.domain, size="1", color=MUTED, no_of_lines=1, flex_shrink="0"),
+            ),
             spacing="1",
             align="center",
         ),

@@ -612,6 +612,16 @@ _OWNED_CUE = re.compile(
 )
 
 
+# `\b` is what makes these safe: in "Women's" the character before "men" is a word
+# character, so the men's pattern cannot match inside the women's one. Verified against
+# all 60 titles in `fixtures/`: 32 men's, 20 women's, and NOTHING matches both.
+# The apostrophe class is not optional. Decathlon sends both forms — U+2019 in
+# "Quechua Men’s MH500 Half-Zip Hiking Fleece" — and keying on U+0027 alone read those
+# as unisex, so the check quietly did nothing on the products it was written for.
+_MENS = re.compile(r"\b(?:men|man)['’]?s\b", re.I)
+_WOMENS = re.compile(r"\b(?:women|woman)['’]?s\b|\bladies\b", re.I)
+
+
 class OpenQuestion(BaseModel):
     key: str
     ask: str
@@ -649,6 +659,20 @@ def check_open_questions(kit: Kit, party_size: int, said: str) -> list[OpenQuest
                 key="existing_kit",
                 ask="If you already own any of this, tell me which and I'll drop those lines "
                 "rather than sell them to you twice.",
+            )
+        )
+
+    # Observed live: a party of ONE was handed a Women's cycling jacket and a Men's base
+    # layer. Nothing checked it, and nothing could — retrieval guarantees the products
+    # are real, not that they are for the same person. Asking beats guessing: dropping
+    # one on a title match would throw away a good product over a word.
+    titles = " | ".join(i.product_title for i in kit.items)
+    if party_size <= 1 and _MENS.search(titles) and _WOMENS.search(titles):
+        open_.append(
+            OpenQuestion(
+                key="gendered_mix",
+                ask="Some of these are men's and some are women's, and this kit is for one "
+                "person. Tell me which you want and I'll swap the odd ones out.",
             )
         )
 

@@ -59,6 +59,10 @@ MAX_REPAIRS = 2
 class Citation(BaseModel):
     title: str = ""
     uri: str
+    # Where the link actually GOES. `uri` is a vertexaisearch redirect, so without this
+    # the customer cannot see the destination before clicking it — and the fixture's
+    # hand-written titles set an expectation live never met.
+    domain: str = ""
 
 
 class _Questions(BaseModel):
@@ -196,7 +200,15 @@ async def _research(session: ConversationSession, message: str) -> tuple[str, li
     gm = r.candidates[0].grounding_metadata if r.candidates else None
     chunks = gm.grounding_chunks if gm and gm.grounding_chunks else []
     citations = [
-        Citation(title=(c.web.title or "")[:160], uri=c.web.uri) for c in chunks if c.web and c.web.uri
+        Citation(
+            # `domain` is what Gemini gives when it has no page title, and it is a far
+            # better label than an empty chip or an opaque redirect URL.
+            title=((c.web.title or "").strip() or (c.web.domain or "").strip() or "source")[:160],
+            uri=c.web.uri,
+            domain=(c.web.domain or "").strip()[:120],
+        )
+        for c in chunks
+        if c.web and c.web.uri
     ]
 
     text = (r.text or "")[:6000]

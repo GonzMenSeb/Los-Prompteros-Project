@@ -890,3 +890,57 @@ computed the asks and threw them away.** It sets `result.kit = session.kit` and
 `result.open_questions`, which `_live_turn` is what reads. The prose listed all three
 assumptions and the button that spends money listed none. Assigned once and reused, so
 the two cannot drift apart again.
+
+### 2026-07-29 · The last three from the live bundle: ask, do not guess; fail loudly, not silently
+
+Three items noted in the run bundle and left unfixed because none had an obvious safe
+answer. All three turned out to have one.
+
+**A party of one was handed a Women's cycling jacket and a Men's base layer.** Retrieval
+guarantees the products are REAL; nothing guaranteed they were for the same person. The
+tempting fix — drop the odd one out on a title match — throws away a good product over a
+word, so this became an open question instead: it asks, and the ask disappears when the
+kit stops being mixed. `\b` is the whole defence in the matcher, because "Women's"
+contains "men's"; there is a test for exactly that.
+
+**`set_backend(stubs)` ran at module import and emitted.** So every live run opened with
+`tools.backend backend=concierge.agent.stubs`, and a real decision was indistinguishable
+in the trace from a fallback nobody chose. Worse, the fallback was SILENT: forget
+`set_backend(catalog)` and the loop builds a kit out of fixture data while claiming to be
+live — which `AGENTS.md` calls the one failure that would invalidate the demo. The
+fallback stays, because tests and scripts rely on it, but it no longer announces itself
+as a choice, and using it without choosing it now emits `guardrail.backend_not_chosen` at
+error level the first time a tool actually serves data.
+
+**Citations rendered as opaque `vertexaisearch` redirects.** `GroundingChunkWeb` carries
+a `domain` alongside `title`, and it was being dropped. The title now falls back to the
+domain rather than to an empty chip, and the domain renders beside it — the `href` is a
+redirect, so naming the destination is the only way a customer can see where a link goes
+before clicking it. That is a trust fix, not decoration.
+
+Review of the entry above, three things:
+
+**The gender matcher missed the products it was written for.** `\b` was the documented
+defence and it is correct — but the pattern was keyed to `'` (U+0027) alone, and
+Decathlon sends both apostrophes. `Quechua Men’s MH500 Half-Zip Hiking Fleece` and
+`Quechua Men’s MH500 Warm Water-Repellent Hiking Fleece Jacket` are in
+`fixtures/collection_hiking-fleeces-mid-layers.json` exactly as the feed returns them,
+with U+2019, and both read as **unisex**. So a Men’s fleece beside a Women's jacket did
+not flag. Swept all 60 fixture titles before and after: men's 30 → **32**, women's 20,
+matching **both** still 0, women's-read-as-men's still 0. The `\b` test now uses one of
+those real titles, since a test built from a hand-typed title is what let this through.
+
+**The fixture dropped the citation domain.** `DEMO_CITATIONS` was `(title, url)`, so
+every fixture chip had `domain=""` and the new label rendered on the live path only —
+in the mode that runs on stage once Gemini quota is gone. The same trap
+`_refresh_open_asks` exists to avoid, one PR later. It is a 3-tuple now, with one
+consumer updated and a test pinning it.
+
+**Two tests asserted source text where the behaviour was directly observable.** The
+backend one checked `"if not chosen:" in src and "return" in src` — `return` is in
+almost every function — and now asserts that an unchosen `_bind` emits no
+`tools.backend` while `set_backend` emits exactly one. The citation one asserted that a
+pydantic field round-trips; the actual claim, that a chunk with no title falls back to
+its domain and then to `"source"`, had no test and now has one driven through
+`_research` with real `types.GroundingChunkWeb` objects. Both were coverage gaps, not
+defects — the code was already right.

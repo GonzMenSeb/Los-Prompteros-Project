@@ -164,6 +164,7 @@ def _reset_session(token: str) -> None:
 class Citation(BaseModel):
     title: str
     url: str
+    domain: str = ""
 
 
 class ChatMessage(BaseModel):
@@ -776,7 +777,7 @@ class State(rx.State):
             ChatMessage(
                 role="assistant",
                 content=demo_data.DEMO_MESSAGES[1][1],
-                citations=[Citation(title=t, url=u) for t, u in demo_data.DEMO_CITATIONS],
+                citations=[Citation(title=t, url=u, domain=d) for t, u, d in demo_data.DEMO_CITATIONS],
             )
         )
         self.awaiting_confirmation = True
@@ -895,7 +896,7 @@ class State(rx.State):
             ChatMessage(
                 role="assistant",
                 content=result.text,
-                citations=[Citation(title=c.title, url=c.uri) for c in result.citations],
+                citations=[Citation(title=c.title, url=c.uri, domain=c.domain) for c in result.citations],
             )
         )
         # A redirect, a greeting or a failed turn produces no kit at all, and must not

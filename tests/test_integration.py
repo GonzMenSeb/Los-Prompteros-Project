@@ -1345,6 +1345,54 @@ class TestTheFirstTimerPolish:
 
         assert {q.key for q in check_open_questions(kit, party, said)} == expected
 
+    def test_one_person_is_not_handed_a_mens_and_a_womens_of_the_same_thing(self):
+        """Observed live: a party of ONE got a Women's cycling jacket and a Men's base
+        layer. Retrieval guarantees the products are real, not that they are for the
+        same person. It asks rather than dropping one — a title match is not worth
+        throwing away a good product over."""
+        from concierge.domain.guardrails import check_open_questions
+        from concierge.domain.models import Kit
+        from tests.conftest import item as make_item
+
+        mixed = [
+            make_item(product_title="Van Rysel Women's Ultralight Waterproof Cycling Jacket"),
+            make_item(product_title="Van Rysel Men's Ultralight Mesh Base Layer"),
+        ]
+        said = "bike commuting, 1500 usd, I have no clothes for that"
+        kit = Kit(items=mixed, unservable_slots=[], budget_minor=90_000)
+
+        assert "gendered_mix" in {q.key for q in check_open_questions(kit, 1, said)}
+        # Two people legitimately split across a men's and a women's line.
+        assert "gendered_mix" not in {q.key for q in check_open_questions(kit, 2, said)}
+
+    def test_the_womens_pattern_does_not_trigger_the_mens_one(self):
+        """"Women's" contains "men's". The word boundary is the whole defence."""
+        from concierge.domain.guardrails import _MENS, _WOMENS
+
+        assert not _MENS.search("Van Rysel Women's Ultralight Jacket")
+        assert _WOMENS.search("Van Rysel Women's Ultralight Jacket")
+        assert _MENS.search("Van Rysel Men's Mesh Base Layer")
+        # And without the apostrophe, where the boundary is doing the same work.
+        assert not _MENS.search("Quechua Womens Fleece")
+        assert _WOMENS.search("Quechua Womens Fleece")
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Quechua Men’s MH500 Half-Zip Hiking Fleece",
+            "Quechua Men’s MH500 Warm Water-Repellent Hiking Fleece Jacket",
+        ],
+    )
+    def test_a_typographic_apostrophe_is_still_a_mens_product(self, title):
+        """Both titles are real — they are in `fixtures/collection_hiking-fleeces-mid-layers.json`
+        as Decathlon sends them, with U+2019 rather than U+0027. A pattern keyed to the
+        straight quote reads them as unisex, so a Men’s fleece beside a Women's jacket
+        does not flag and the check quietly does nothing on live data."""
+        from concierge.domain.guardrails import _MENS, _WOMENS
+
+        assert _MENS.search(title)
+        assert not _WOMENS.search(title)
+
     def test_an_answered_question_stops_being_asked(self):
         """The point of deriving these every turn instead of re-running the question
         stage: they go away by themselves, so a standing offer never becomes a nag."""
@@ -1365,6 +1413,83 @@ class TestTheFirstTimerPolish:
 
         keys = {q.key for q in check_open_questions(Kit(items=[], unservable_slots=[]), 1, "hiking")}
         assert keys == {"party_size"}, "no kit means no budget or duplicate to talk about"
+
+    async def test_serving_stubs_without_choosing_them_is_an_error_not_a_default(self):
+        """AGENTS.md calls serving stubs while claiming to be live "the one failure that
+        would invalidate the whole demo". It was the SILENT default: forget
+        set_backend(catalog) and the loop builds a kit out of fixture data."""
+        tools = _mod("concierge.agent.tools")
+        from concierge.obs.trace import recent
+
+        tools._bind(tools.stubs, chosen=False)
+        await tools.backend().get_taxonomy()
+        assert any(e.event == "guardrail.backend_not_chosen" for e in recent(30))
+
+        tools.set_backend(tools.stubs)
+        assert any(e.event == "tools.backend" for e in recent(10))
+
+    def test_choosing_a_backend_is_announced_and_defaulting_to_one_is_not(self, sink):
+        """The import-time bind used to emit, which put a `backend=…stubs` line at the
+        head of every live run and made a real choice indistinguishable from a fallback."""
+        tools = _mod("concierge.agent.tools")
+
+        tools._bind(tools.stubs, chosen=False)
+        assert not [e for e in sink if e.event == "tools.backend"], "a fallback is not a decision"
+
+        tools.set_backend(tools.stubs)
+        assert [e.event for e in sink if e.event == "tools.backend"] == ["tools.backend"]
+
+    async def test_a_citation_with_no_page_title_falls_back_to_its_domain(self, monkeypatch):
+        """The stated point of the citation change, and the one part of it with no test.
+        `title` is routinely absent while `domain` is present, and the chip rendered
+        empty — on a page whose whole pitch is that the research is grounded."""
+        from google.genai import types
+
+        loop = _mod("concierge.agent.loop")
+        redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/"
+
+        def chunk(title, domain, n):
+            return types.GroundingChunk(
+                web=types.GroundingChunkWeb(uri=f"{redirect}{n}", title=title, domain=domain)
+            )
+
+        class Response:
+            text = "The páramo sits above 3,000 m."
+            candidates = [
+                types.Candidate(
+                    grounding_metadata=types.GroundingMetadata(
+                        grounding_chunks=[
+                            chunk("", "weatherspark.com", 1),
+                            chunk("Páramo climate", "en.wikipedia.org", 2),
+                            chunk("", "", 3),
+                        ]
+                    )
+                )
+            ]
+
+        async def fake_model(session, **kwargs):
+            return Response()
+
+        monkeypatch.setattr(loop, "_model", fake_model)
+        _text, citations = await loop._research(loop.ConversationSession(), "two nights in the páramo")
+
+        assert [c.title for c in citations] == ["weatherspark.com", "Páramo climate", "source"]
+        assert [c.domain for c in citations] == ["weatherspark.com", "en.wikipedia.org", ""]
+
+    def test_the_ui_renders_the_domain_beside_the_title(self):
+        chat = _mod("concierge.ui.chat")
+        import inspect
+
+        assert "c.domain" in inspect.getsource(chat.citation_link)
+
+    def test_the_fixture_citations_carry_a_domain_like_the_live_ones(self):
+        """Fixture mode is what runs on stage once Gemini quota is gone, and it builds its
+        chips from `DEMO_CITATIONS` rather than from `_research`. Carrying the domain only
+        on the live path is the same trap `_refresh_open_asks` was written to avoid: the
+        fix present in the mode nobody demos and absent in the one they do."""
+        from concierge.ui import demo_data
+
+        assert all(len(c) == 3 and c[2] for c in demo_data.DEMO_CITATIONS)
 
     def test_the_asks_reach_the_page_not_just_the_prose(self):
         """Prose scrolls away — the same reason the size ask got its own control."""
