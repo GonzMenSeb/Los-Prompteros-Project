@@ -609,25 +609,41 @@ def check_query_shape(q: str) -> str:
 #
 # Bias is deliberately toward staying quiet. A cue that the customer TOLD us something
 # counts as answered even if loosely matched: under-asking is a smaller harm than
-# pestering someone who already replied.
+# pestering someone who already replied. A common word is not a loose answer though —
+# a cue has to be ABOUT the party or ABOUT owning gear, or the ask is silenced by
+# language nobody meant as an answer, forever, which is the defect this replaced.
 _PARTY_CUE = re.compile(
-    r"\b(we|us|our|ourselves|both|couple|group|family|friends?|team|"
+    # "both" alone was a live regression: "My size is XL in both" is two garments.
+    r"\b(we|us|our|ourselves|both of us|us both|couple|group|family|friends?|team|"
     r"my (wife|husband|girlfriend|boyfriend|partner|son|daughter|kids?|child|mum|mom|dad|brother|sister)|"
     r"\d+\s*(people|persons|adults|of us)|"
     r"nosotros|mi (esposa|esposo|novia|novio|pareja|hijo|hija)|amigos?|familia|pareja)\b",
     re.I,
 )
+# Gear, so an ownership verb has something to own. A bare "have" is not a cue —
+# "what do I have to buy?" is the opposite of an answer.
+_GEAR = (
+    r"(gear|kit|equipment|clothes|clothing|boots|shoes|jackets?|trousers|pants|"
+    r"pack|backpack|tent|sleeping bags?|bag|helmet|gloves|"
+    r"ropa|equipo|botas|zapatos|chaquetas?|carpa|casco|guantes)"
+)
+_OWNS = r"(own|owns|have|has|had|got|bring|bringing|tengo|tenemos|traigo)"
 _OWNED_CUE = re.compile(
-    r"\b(already|own|owns|have|has|got|nothing|none|no (clothes|gear|kit|equipment|boots)|"
-    r"tengo|tengo ya|nada|ninguno)\b",
+    rf"\balready\s+{_OWNS}\b"
+    rf"|\b{_OWNS}\s+(\w+\s+){{0,3}}({_GEAR}|nothing|none|nada|ninguno)\b"
+    rf"|\bno\s+{_GEAR}\b",
     re.I,
 )
 
 
 # `\b` is what makes these safe: in "Women's" the character before "men" is a word
-# character, so the men's pattern cannot match inside the women's one. Verified.
-_MENS = re.compile(r"\b(men's|mens|man's)\b", re.I)
-_WOMENS = re.compile(r"\b(women's|womens|woman's|ladies)\b", re.I)
+# character, so the men's pattern cannot match inside the women's one. Verified against
+# all 60 titles in `fixtures/`: 32 men's, 20 women's, and NOTHING matches both.
+# The apostrophe class is not optional. Decathlon sends both forms — U+2019 in
+# "Quechua Men’s MH500 Half-Zip Hiking Fleece" — and keying on U+0027 alone read those
+# as unisex, so the check quietly did nothing on the products it was written for.
+_MENS = re.compile(r"\b(?:men|man)['’]?s\b", re.I)
+_WOMENS = re.compile(r"\b(?:women|woman)['’]?s\b|\bladies\b", re.I)
 
 
 class OpenQuestion(BaseModel):

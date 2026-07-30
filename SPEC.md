@@ -427,6 +427,8 @@ Two deliberate choices. `available: Literal[True]` means an out-of-stock item ca
 | Stock — every cart item confirmed via `get_product` | `guardrails.py` | Cannot enter `Kit` (enforced by `Literal[True]`) |
 | Size substitution disclosure | `guardrails.py` | `size_substituted` forces an explicit sentence from the agent |
 | Unconfirmed size — a wearable the customer never sized | `guardrails.py` | `size_confirmed=False` forces an explicit ask, both with the kit and again after the cart link |
+| Unanswered question — the kit is assuming a budget, a party of one, that they own none of this, or that a men's/women's mix is intended | `guardrails.py` | `check_open_questions` derives it from what the customer actually typed, on every turn that shows a kit; each ask disappears the moment it is answered. The question stage runs once, so nothing else would ever ask again. It **asks**, never edits the kit — retrieval proves a product is real, not that it is for the same person |
+| Backend not chosen — serving fixture data while claiming to be live | `agent/tools.py` | The stub fallback stays for tests and scripts but no longer announces itself as a decision; serving from it without `set_backend` emits `guardrail.backend_not_chosen` at **error** level on the first tool that returns data |
 | Budget — integer arithmetic in minor units | `guardrails.py` | Computed in code, never by the model; over budget → report gap or substitute |
 | Provenance — nothing rendered that isn't a real variant | `guardrails.py` | Cards require `variant_id` + product URL; prose-only product mentions stripped |
 | Query shape — keyword fallback stays 1–3 words | `catalog.py` | Strips conditions/specs, truncates to head noun |

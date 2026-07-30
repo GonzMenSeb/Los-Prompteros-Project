@@ -848,6 +848,49 @@ party size from the kit's own person ordinals.
 The asks also reach the confirm bar, not just the prose — same reasoning as the size
 ask before them: prose scrolls away and the button that spends money does not.
 
+### 2026-07-29 · A cue has to be about the thing, not merely contain a common word
+
+Review of the entry above. The bias toward silence is right and stays; the cues that
+implemented it were not cues. `_PARTY_CUE` matched a bare `both`, and *"My size is XL in
+both"* is a verbatim live message from earlier the same day — recorded higher up this
+file. A customer answering the size question therefore silenced the party question, for
+the rest of the conversation, with the words the size question asked for.
+
+`_OWNED_CUE` matched a bare `have`, `has`, `got`, `already`, `nothing`. So *"what do I
+have to buy?"* read as *"I already own things"* — the exact opposite of what was said.
+`"I have a trip to the páramo"`, `"I have never camped before"`, `"I already booked the
+flights"` and `"nothing fancy, just something warm"` all closed the existing-kit
+question too. `said` is every message the customer has ever sent, so the longer someone
+talks the likelier an accidental cue, and the asks quietly stop for good.
+
+An ownership verb now needs something ownable within three words (`_GEAR`, or
+`nothing`/`nada`), `already` needs a verb after it, and `both` became `both of us` /
+`us both`. `we|us|our` stay loose on purpose: `_refresh_open_asks` derives party size
+from `person_indexes`, which `models.py` documents as empty for a party of one **or a
+shared kit**, so a three-person all-shared kit derives 1 and the cue scan is the only
+thing standing between that and a wrong ask.
+
+Two wiring holes from the same review:
+
+**`result.kit is None` does not mean there is no kit.** It means this turn did not build
+one. A redirect, a rate limit, and the model-call budget stop all leave the previous kit
+on screen, and `awaiting_confirmation` deliberately keeps the confirm bar up — the same
+`_BudgetExceeded` path that now says *"the kit above is still good"*. The asks were
+cleared at the start of the turn and never restored, so the button that spends money
+stopped disclosing what it assumed. It falls back to `_refresh_open_asks`.
+
+**The fixture emitted its guardrail event after the last drain of the turn**, so
+`guardrail.open_questions` never reached the trace panel in the mode that runs on stage.
+`_fixture_resize` drains after its own emits; `_fixture_turn` did not.
+
+A third, found by re-checking a claim rather than a line of code: the **injection reply
+computed the asks and threw them away.** It sets `result.kit = session.kit` and
+`offer_cart`, so it is a kit turn with the confirm bar standing — but it passed
+`_open_questions(...)` straight into `_disclosures` without ever assigning
+`result.open_questions`, which `_live_turn` is what reads. The prose listed all three
+assumptions and the button that spends money listed none. Assigned once and reused, so
+the two cannot drift apart again.
+
 ### 2026-07-29 · The last three from the live bundle: ask, do not guess; fail loudly, not silently
 
 Three items noted in the run bundle and left unfixed because none had an obvious safe
@@ -874,6 +917,33 @@ a `domain` alongside `title`, and it was being dropped. The title now falls back
 domain rather than to an empty chip, and the domain renders beside it — the `href` is a
 redirect, so naming the destination is the only way a customer can see where a link goes
 before clicking it. That is a trust fix, not decoration.
+
+Review of the entry above, three things:
+
+**The gender matcher missed the products it was written for.** `\b` was the documented
+defence and it is correct — but the pattern was keyed to `'` (U+0027) alone, and
+Decathlon sends both apostrophes. `Quechua Men’s MH500 Half-Zip Hiking Fleece` and
+`Quechua Men’s MH500 Warm Water-Repellent Hiking Fleece Jacket` are in
+`fixtures/collection_hiking-fleeces-mid-layers.json` exactly as the feed returns them,
+with U+2019, and both read as **unisex**. So a Men’s fleece beside a Women's jacket did
+not flag. Swept all 60 fixture titles before and after: men's 30 → **32**, women's 20,
+matching **both** still 0, women's-read-as-men's still 0. The `\b` test now uses one of
+those real titles, since a test built from a hand-typed title is what let this through.
+
+**The fixture dropped the citation domain.** `DEMO_CITATIONS` was `(title, url)`, so
+every fixture chip had `domain=""` and the new label rendered on the live path only —
+in the mode that runs on stage once Gemini quota is gone. The same trap
+`_refresh_open_asks` exists to avoid, one PR later. It is a 3-tuple now, with one
+consumer updated and a test pinning it.
+
+**Two tests asserted source text where the behaviour was directly observable.** The
+backend one checked `"if not chosen:" in src and "return" in src` — `return` is in
+almost every function — and now asserts that an unchosen `_bind` emits no
+`tools.backend` while `set_backend` emits exactly one. The citation one asserted that a
+pydantic field round-trips; the actual claim, that a chunk with no title falls back to
+its domain and then to `"source"`, had no test and now has one driven through
+`_research` with real `types.GroundingChunkWeb` objects. Both were coverage gaps, not
+defects — the code was already right.
 
 ### 2026-07-30 · A correction has to reach the profile, and the kit has to be able to shrink
 
@@ -922,3 +992,4 @@ And because a second link supersedes the first with no way to tell what moved,
 `confirm_cart` now diffs the lines against the last cart and says so, then closes by
 telling the customer to open the cart and check it before paying. The link is the
 handover, not a receipt.
+
