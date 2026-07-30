@@ -613,9 +613,13 @@ _OWNED_CUE = re.compile(
 
 
 # `\b` is what makes these safe: in "Women's" the character before "men" is a word
-# character, so the men's pattern cannot match inside the women's one. Verified.
-_MENS = re.compile(r"\b(men's|mens|man's)\b", re.I)
-_WOMENS = re.compile(r"\b(women's|womens|woman's|ladies)\b", re.I)
+# character, so the men's pattern cannot match inside the women's one. Verified against
+# all 60 titles in `fixtures/`: 32 men's, 20 women's, and NOTHING matches both.
+# The apostrophe class is not optional. Decathlon sends both forms — U+2019 in
+# "Quechua Men’s MH500 Half-Zip Hiking Fleece" — and keying on U+0027 alone read those
+# as unisex, so the check quietly did nothing on the products it was written for.
+_MENS = re.compile(r"\b(?:men|man)['’]?s\b", re.I)
+_WOMENS = re.compile(r"\b(?:women|woman)['’]?s\b|\bladies\b", re.I)
 
 
 class OpenQuestion(BaseModel):

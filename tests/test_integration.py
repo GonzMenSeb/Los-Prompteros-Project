@@ -1372,6 +1372,26 @@ class TestTheFirstTimerPolish:
         assert not _MENS.search("Van Rysel Women's Ultralight Jacket")
         assert _WOMENS.search("Van Rysel Women's Ultralight Jacket")
         assert _MENS.search("Van Rysel Men's Mesh Base Layer")
+        # And without the apostrophe, where the boundary is doing the same work.
+        assert not _MENS.search("Quechua Womens Fleece")
+        assert _WOMENS.search("Quechua Womens Fleece")
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Quechua Men’s MH500 Half-Zip Hiking Fleece",
+            "Quechua Men’s MH500 Warm Water-Repellent Hiking Fleece Jacket",
+        ],
+    )
+    def test_a_typographic_apostrophe_is_still_a_mens_product(self, title):
+        """Both titles are real — they are in `fixtures/collection_hiking-fleeces-mid-layers.json`
+        as Decathlon sends them, with U+2019 rather than U+0027. A pattern keyed to the
+        straight quote reads them as unisex, so a Men’s fleece beside a Women's jacket
+        does not flag and the check quietly does nothing on live data."""
+        from concierge.domain.guardrails import _MENS, _WOMENS
+
+        assert _MENS.search(title)
+        assert not _WOMENS.search(title)
 
     def test_an_answered_question_stops_being_asked(self):
         """The point of deriving these every turn instead of re-running the question
@@ -1408,26 +1428,68 @@ class TestTheFirstTimerPolish:
         tools.set_backend(tools.stubs)
         assert any(e.event == "tools.backend" for e in recent(10))
 
-    def test_choosing_a_backend_is_announced_and_defaulting_to_one_is_not(self):
+    def test_choosing_a_backend_is_announced_and_defaulting_to_one_is_not(self, sink):
         """The import-time bind used to emit, which put a `backend=…stubs` line at the
         head of every live run and made a real choice indistinguishable from a fallback."""
-        import inspect
-
         tools = _mod("concierge.agent.tools")
-        src = inspect.getsource(tools._bind)
-        assert "if not chosen:" in src and "return" in src
 
-    def test_a_citation_can_always_be_read_and_placed(self):
-        """The href is a vertexaisearch redirect, so without a label the customer cannot
-        see where a link goes. Gemini gives `domain` when it has no page title."""
+        tools._bind(tools.stubs, chosen=False)
+        assert not [e for e in sink if e.event == "tools.backend"], "a fallback is not a decision"
+
+        tools.set_backend(tools.stubs)
+        assert [e.event for e in sink if e.event == "tools.backend"] == ["tools.backend"]
+
+    async def test_a_citation_with_no_page_title_falls_back_to_its_domain(self, monkeypatch):
+        """The stated point of the citation change, and the one part of it with no test.
+        `title` is routinely absent while `domain` is present, and the chip rendered
+        empty — on a page whose whole pitch is that the research is grounded."""
+        from google.genai import types
+
         loop = _mod("concierge.agent.loop")
+        redirect = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/"
 
-        assert loop.Citation(uri="https://x/redirect", title="", domain="wikipedia.org").domain
-        # The UI must render the domain, not just the title.
+        def chunk(title, domain, n):
+            return types.GroundingChunk(
+                web=types.GroundingChunkWeb(uri=f"{redirect}{n}", title=title, domain=domain)
+            )
+
+        class Response:
+            text = "The páramo sits above 3,000 m."
+            candidates = [
+                types.Candidate(
+                    grounding_metadata=types.GroundingMetadata(
+                        grounding_chunks=[
+                            chunk("", "weatherspark.com", 1),
+                            chunk("Páramo climate", "en.wikipedia.org", 2),
+                            chunk("", "", 3),
+                        ]
+                    )
+                )
+            ]
+
+        async def fake_model(session, **kwargs):
+            return Response()
+
+        monkeypatch.setattr(loop, "_model", fake_model)
+        _text, citations = await loop._research(loop.ConversationSession(), "two nights in the páramo")
+
+        assert [c.title for c in citations] == ["weatherspark.com", "Páramo climate", "source"]
+        assert [c.domain for c in citations] == ["weatherspark.com", "en.wikipedia.org", ""]
+
+    def test_the_ui_renders_the_domain_beside_the_title(self):
+        chat = _mod("concierge.ui.chat")
         import inspect
 
-        chat = _mod("concierge.ui.chat")
         assert "c.domain" in inspect.getsource(chat.citation_link)
+
+    def test_the_fixture_citations_carry_a_domain_like_the_live_ones(self):
+        """Fixture mode is what runs on stage once Gemini quota is gone, and it builds its
+        chips from `DEMO_CITATIONS` rather than from `_research`. Carrying the domain only
+        on the live path is the same trap `_refresh_open_asks` was written to avoid: the
+        fix present in the mode nobody demos and absent in the one they do."""
+        from concierge.ui import demo_data
+
+        assert all(len(c) == 3 and c[2] for c in demo_data.DEMO_CITATIONS)
 
     def test_the_asks_reach_the_page_not_just_the_prose(self):
         """Prose scrolls away — the same reason the size ask got its own control."""

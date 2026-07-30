@@ -777,7 +777,7 @@ class State(rx.State):
             ChatMessage(
                 role="assistant",
                 content=demo_data.DEMO_MESSAGES[1][1],
-                citations=[Citation(title=t, url=u) for t, u in demo_data.DEMO_CITATIONS],
+                citations=[Citation(title=t, url=u, domain=d) for t, u, d in demo_data.DEMO_CITATIONS],
             )
         )
         self.awaiting_confirmation = True

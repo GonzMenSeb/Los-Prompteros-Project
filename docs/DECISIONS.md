@@ -917,3 +917,30 @@ a `domain` alongside `title`, and it was being dropped. The title now falls back
 domain rather than to an empty chip, and the domain renders beside it — the `href` is a
 redirect, so naming the destination is the only way a customer can see where a link goes
 before clicking it. That is a trust fix, not decoration.
+
+Review of the entry above, three things:
+
+**The gender matcher missed the products it was written for.** `\b` was the documented
+defence and it is correct — but the pattern was keyed to `'` (U+0027) alone, and
+Decathlon sends both apostrophes. `Quechua Men’s MH500 Half-Zip Hiking Fleece` and
+`Quechua Men’s MH500 Warm Water-Repellent Hiking Fleece Jacket` are in
+`fixtures/collection_hiking-fleeces-mid-layers.json` exactly as the feed returns them,
+with U+2019, and both read as **unisex**. So a Men’s fleece beside a Women's jacket did
+not flag. Swept all 60 fixture titles before and after: men's 30 → **32**, women's 20,
+matching **both** still 0, women's-read-as-men's still 0. The `\b` test now uses one of
+those real titles, since a test built from a hand-typed title is what let this through.
+
+**The fixture dropped the citation domain.** `DEMO_CITATIONS` was `(title, url)`, so
+every fixture chip had `domain=""` and the new label rendered on the live path only —
+in the mode that runs on stage once Gemini quota is gone. The same trap
+`_refresh_open_asks` exists to avoid, one PR later. It is a 3-tuple now, with one
+consumer updated and a test pinning it.
+
+**Two tests asserted source text where the behaviour was directly observable.** The
+backend one checked `"if not chosen:" in src and "return" in src` — `return` is in
+almost every function — and now asserts that an unchosen `_bind` emits no
+`tools.backend` while `set_backend` emits exactly one. The citation one asserted that a
+pydantic field round-trips; the actual claim, that a chunk with no title falls back to
+its domain and then to `"source"`, had no test and now has one driven through
+`_research` with real `types.GroundingChunkWeb` objects. Both were coverage gaps, not
+defects — the code was already right.

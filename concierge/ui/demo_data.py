@@ -285,18 +285,24 @@ DEMO_MESSAGES: list[tuple[str, str]] = [
     ),
 ]
 
-DEMO_CITATIONS: list[tuple[str, str]] = [
+# (title, url, domain). The domain is carried here too, because the live path renders it
+# beside the title and this is the path that runs on stage once Gemini quota is gone — a
+# fixture that drops it shows a demo the live product does not match.
+DEMO_CITATIONS: list[tuple[str, str, str]] = [
     (
         "Páramo de Santurbán — elevation and climate",
         "https://en.wikipedia.org/wiki/P%C3%A1ramo_de_Santurb%C3%A1n",
+        "en.wikipedia.org",
     ),
     (
         "Santander, Colombia — high-altitude weather averages",
         "https://weatherspark.com/y/24437/Average-Weather-in-Bucaramanga-Colombia-Year-Round",
+        "weatherspark.com",
     ),
     (
         "Páramo ecosystem — precipitation and humidity",
         "https://en.wikipedia.org/wiki/P%C3%A1ramo",
+        "en.wikipedia.org",
     ),
 ]
 
