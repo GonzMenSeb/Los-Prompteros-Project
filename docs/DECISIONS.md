@@ -874,3 +874,51 @@ a `domain` alongside `title`, and it was being dropped. The title now falls back
 domain rather than to an empty chip, and the domain renders beside it — the `href` is a
 redirect, so naming the destination is the only way a customer can see where a link goes
 before clicking it. That is a trust fix, not decoration.
+
+### 2026-07-30 · A correction has to reach the profile, and the kit has to be able to shrink
+
+From a live run. The customer said *"I wanna start to make running with a 10 kilometers
+race"* and got back a research report on **Edmonton, Alberta**, with elevation, forecast
+and seven citations. They never mentioned Canada. `RESEARCH_PROMPT` told the model to
+find *"where this actually is"* with no way to answer "they did not say", so it picked
+somewhere.
+
+They corrected it: *"I aint searching a race in Canada"*. The trace for that turn has no
+`research.grounded`, no `profile.built`, no `slots.derived` — `_continue` only researches
+`if session.profile is None`, and it never becomes None again. **The kit came back still
+sized to Edmonton's summer**: the correction was agreed with in prose and changed nothing.
+
+So the gate now returns `corrects_premise`, and a true verdict throws the profile, the
+slots and the research away and rebuilds. It is capped at two per session: a rebuild is
+three model calls and about forty seconds. The correction is APPENDED to the trip rather
+than replacing it — "not in Canada" is not a trip on its own.
+
+The prompt is also told, first thing, not to name a place the customer did not: research
+the ACTIVITY and give ranges. That is a suggestion, not a guarantee, which is why the
+`corrects_premise` rebuild exists behind it.
+
+Same run, second complaint: the reply was a wall. Five sourced sections — elevation,
+temperature, rainfall, terrain, hazards — in front of someone who had asked one question
+and was about to be asked three back. The research prompt now leads with a ≤45-word
+paragraph and only that reaches the chat; `_headline` falls back to a hard truncation
+rather than to the whole report, because a model that ignores the format rule must not
+be able to dump five sections into the conversation.
+
+Two smaller ones from the same bundle. `scrub_prose` excised a claim and left the
+preposition that introduced it — *"a wide temperature jump from to"*, on a projector; the
+connector that pointed AT the claim now goes with it. And a pair of running shorts
+arrived in **3XL** with nothing said, because one available variant sets `sized=False`,
+which suppresses the size question. No question was owed — there was no choice — but the
+fact was still theirs, so `sole_size` now carries it to a disclosure.
+
+Finally, the kit could only ever grow. There was no way to say "I already have shoes" or
+"drop the hat". `_drop` is the mirror of `_resize`: deterministic, zero model calls,
+removes only what the message actually names. A token shared by most of the kit
+("running") identifies nothing and is discarded before matching, or "drop the running
+belt" would empty the cart; a message that would empty the kit falls through instead,
+because that is never what "I already have shoes" meant.
+
+And because a second link supersedes the first with no way to tell what moved,
+`confirm_cart` now diffs the lines against the last cart and says so, then closes by
+telling the customer to open the cart and check it before paying. The link is the
+handover, not a receipt.

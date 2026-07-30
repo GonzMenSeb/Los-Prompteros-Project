@@ -60,8 +60,15 @@ equipped correctly. Search the web.
 TRIP: {message}
 {extra}
 
+FIRST, decide whether the customer actually named a place. If they did not, DO NOT \
+PICK ONE. Never name a city, region, country or specific event they did not \
+mention: research the ACTIVITY in general instead, say plainly that no location \
+was given, and give ranges rather than a forecast. Inventing "the Edmonton 10K" \
+for someone who said "a 10 kilometre race" is the worst thing you can do here — \
+everything downstream is then sized for weather they will never run in.
+
 Find and state, with the source for each:
-  * where this actually is, and the elevation in metres;
+  * where this is, and the elevation in metres — ONLY if they named the place;
   * the temperature range in DEGREES CELSIUS at that elevation for the current \
 season, including the overnight low;
   * rainfall, fog and humidity typical of the season;
@@ -69,9 +76,15 @@ season, including the overnight low;
   * the hazards that change what you pack (wind chill, sun at altitude, river \
 crossings, sudden fog, altitude sickness).
 
-Report in compact prose, under 250 words. Give numbers, not adjectives. If a \
-number is unavailable, say you are estimating and from what. Recommend no \
-products — this step is conditions only."""
+FORMAT, and this matters — the first paragraph is the only part the customer \
+reads:
+  * Open with ONE paragraph of at most 45 words naming only the two or three \
+conditions that change what they should pack. No headings, no sources in it.
+  * Then a blank line, then the detail with a source per claim.
+
+Under 250 words total. Give numbers, not adjectives. If a number is unavailable, \
+say you are estimating and from what. Recommend no products — this step is \
+conditions only."""
 
 
 PROFILE_PROMPT = """Convert the research below into one structured activity profile.

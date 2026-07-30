@@ -33,6 +33,7 @@ from concierge.domain.guardrails import (
     check_budget,
     check_open_questions,
     check_size_confirmation,
+    check_sole_sizes,
     check_stock,
     check_substitution,
     scrub_prose,
@@ -92,6 +93,7 @@ class TurnResult(BaseModel):
     unservable_slots: list[str] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
     questions: list[Question] = Field(default_factory=list)
+    corrects_premise: bool = False
     open_questions: list[OpenQuestion] = Field(default_factory=list)
     offer_cart: bool = False
     error: str = ""
@@ -116,6 +118,11 @@ class ConversationSession:
     catalog: dict[str, CatalogProduct] = field(default_factory=dict)
     slot_products: dict[str, list[str]] = field(default_factory=dict)
     model_calls: int = 0
+    # Research and profile only ever ran on turn one, so a customer who corrected the
+    # premise got a kit still built on the version we made up. Capped: a rebuild is
+    # three model calls and about forty seconds, and a conversation that keeps
+    # contradicting itself must not be able to spend the turn budget on it.
+    rebuilds: int = 0
 
     def transcript(self, limit: int = 6) -> str:
         return "\n".join(f"{t['role']}: {t['text'][:400]}" for t in self.turns[-limit:])
@@ -725,6 +732,13 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
                     "available": resolved.available,
                     "size_substituted": resolved.substituted,
                     "size_confirmed": resolved.requested_size is not None or not sized,
+                    # personal, one variant left, and they never named a size: nothing
+                    # was owed as a question, but the fact is still theirs to know.
+                    "sole_size": (
+                        personal
+                        and resolved.requested_size is None
+                        and len([v for v in product.variants if v.available]) == 1
+                    ),
                     "person_indexes": people_,
                     "rationale": pick.rationale[:300],
                 }
@@ -774,7 +788,11 @@ def _disclosures(
     open_questions: list[OpenQuestion] | None = None,
 ) -> str:
     """Emitted from data, not from the model, so they cannot be forgotten."""
-    lines = list(check_substitution(kit.items)) + check_size_confirmation(kit.items)
+    lines = (
+        list(check_substitution(kit.items))
+        + check_size_confirmation(kit.items)
+        + check_sole_sizes(kit.items)
+    )
     # A slot we could not read reaches _select as unfilled and lands in
     # unservable_slots like any other. Split it back out here, or the honest
     # "couldn't check" line runs directly under a "not stocked" claim about the
@@ -831,6 +849,18 @@ async def _present(session: ConversationSession, kit: Kit, allowed_minor: list[i
     return scrub_prose((r.text or "").strip(), kit.items, allowed_minor=allowed_minor)
 
 
+def _headline(research: str) -> str:
+    """The first paragraph of the research, which the prompt asks for as a standalone
+    summary. Falls back to a hard truncation rather than to the whole report — a
+    model that ignores the format rule must not be able to dump five sections into
+    the chat."""
+    first = next((p.strip() for p in (research or "").split("\n\n") if p.strip()), "")
+    if len(first) <= 400:
+        return first
+    cut = first[:400].rsplit(". ", 1)[0]
+    return (cut + ".") if cut else first[:400]
+
+
 def _render_questions(qs: list[Question]) -> str:
     return "\n".join(f"{n}. {q.text}" for n, q in enumerate(qs, 1))
 
@@ -847,7 +877,7 @@ async def run_turn(user_message: str, session: ConversationSession) -> TurnResul
     # the try below. A second handler here only looked like it covered the gate.
     verdict = await classify(user_message, session.transcript())
 
-    result = TurnResult(intent=verdict.intent)
+    result = TurnResult(intent=verdict.intent, corrects_premise=verdict.corrects_premise)
     try:
         if verdict.intent == "greeting":
             result.text, result.stage = prompts.GREETING_TEMPLATE, "greeting"
@@ -976,6 +1006,91 @@ def _wants_resize(session: ConversationSession, message: str, result: TurnResult
     return tokens if (_SIZE_CUE.search(message) or only_sizes) else []
 
 
+# "I already have shoes" and "drop the hat" are the same instruction: this line should
+# not be in the cart. There was no route for either — the kit only ever grew.
+_DROP_CUE = re.compile(
+    r"\b(remove|drop|delete|take (?:it )?out|take off|lose|skip|without|no need|"
+    r"don'?t need|do not need|don'?t want|already (?:have|own|got)|"
+    r"i (?:have|own|got)|quita(?:r)?|ya tengo|no necesito|sin)\b",
+    re.I,
+)
+# Brand and category words repeat across a running kit, so they identify nothing.
+_UNDISTINCTIVE = {
+    "kiprun", "quechua", "simond", "forclaz", "van", "rysel", "kalenji", "decathlon",
+    "men", "mens", "women", "womens", "unisex", "s", "the", "a", "an", "and", "or",
+    "running", "run", "trail", "hiking", "dry", "light", "ultra", "pack", "of",
+}
+
+
+def _tokens(text: str) -> set[str]:
+    return {t for t in re.findall(r"[a-z0-9]+", text.lower()) if len(t) > 2}
+
+
+def _lines_named(kit: Kit, message: str) -> list[int]:
+    """Indexes of the kit lines this message actually names.
+
+    A token shared by most of the kit ("running") identifies nothing, so it is thrown
+    away before matching — otherwise "drop the running belt" empties the cart."""
+    said = _tokens(message)
+    per_item = [(_tokens(i.slot) | _tokens(i.product_title)) - _UNDISTINCTIVE for i in kit.items]
+    if not per_item:
+        return []
+    counts: dict[str, int] = {}
+    for toks in per_item:
+        for t in toks:
+            counts[t] = counts.get(t, 0) + 1
+    limit = max(1, len(per_item) // 2)
+    return [n for n, toks in enumerate(per_item) if said & {t for t in toks if counts[t] <= limit}]
+
+
+async def _drop(
+    session: ConversationSession, user_message: str, result: TurnResult
+) -> TurnResult | None:
+    """Take named lines out of the kit. Deterministic, zero model calls, and it only
+    ever REMOVES — a turn that would empty the kit falls through instead, because an
+    empty cart is never what "I already have shoes" meant."""
+    kit = session.kit
+    if result.intent != "clarify" or kit is None or not kit.items:
+        return None
+    if not _DROP_CUE.search(user_message) or _size_tokens(user_message):
+        return None
+
+    hit = _lines_named(kit, user_message)
+    if not hit or len(hit) == len(kit.items):
+        return None
+
+    dropped = [kit.items[n] for n in hit]
+    kept = [i for n, i in enumerate(kit.items) if n not in set(hit)]
+    emit(
+        "guardrail.lines_dropped",
+        {"dropped": [i.product_title for i in dropped], "kept": len(kept)},
+        level="guardrail",
+    )
+
+    session.answers.append(user_message)
+    kit = Kit(
+        items=kept,
+        # The slot is not unservable — the customer just does not want it from us.
+        unservable_slots=list(session.unservable_slots),
+        budget_minor=_budget_minor(session),
+    )
+    session.kit = kit
+
+    lines = "\n".join(f"• {i.product_title} — {i.size_label}" for i in dropped)
+    body = (
+        f"Taken out of the kit, {len(dropped)} line{'s' if len(dropped) > 1 else ''}:\n\n{lines}"
+        "\n\nSay the word if you want any of them back."
+    )
+    result.open_questions = _open_questions(session, kit)
+    result.kit, result.unservable_slots = kit, list(session.unservable_slots)
+    result.profile, result.slots = session.profile, session.slots
+    result.citations = session.citations
+    result.offer_cart = bool(kit.items)
+    result.stage = "kit"
+    result.text = f"{body}\n\n{_disclosures(kit, session.unchecked_slots, result.open_questions)}".strip()
+    return result
+
+
 async def _resize(
     session: ConversationSession, user_message: str, result: TurnResult
 ) -> TurnResult | None:
@@ -1086,11 +1201,45 @@ async def _resize(
     return result
 
 
+MAX_REBUILDS = 2
+
+
+def _rebuild_premise(session: ConversationSession, user_message: str) -> None:
+    """Throw away a profile the customer has just contradicted.
+
+    The correction is APPENDED to the trip rather than replacing it: "not in Canada"
+    on its own is not a trip, and the original description is still most of what we
+    know. Slots go too — they were derived from the profile."""
+    emit(
+        "guardrail.premise_changed",
+        {"rebuild": session.rebuilds + 1, "correction": user_message[:160]},
+        level="guardrail",
+    )
+    session.rebuilds += 1
+    session.answers.append(user_message)
+    session.trip_message = (
+        f"{session.trip_message}\n\nThe customer then corrected this: {user_message}"
+    )
+    session.profile = None
+    session.slots = []
+    session.research_text, session.citations = "", []
+
+
 async def _continue(session: ConversationSession, user_message: str, result: TurnResult) -> TurnResult:
+    # A correction to the trip itself invalidates everything derived from it. Without
+    # this the customer says "that's not in Canada", the agent agrees in prose, and
+    # hands back a kit still sized to Canadian summer — observed live.
+    if (
+        session.profile is not None
+        and result.corrects_premise
+        and session.rebuilds < MAX_REBUILDS
+    ):
+        _rebuild_premise(session, user_message)
+
     if session.profile is None:
-        session.trip_message = user_message
-        session.research_text, session.citations = await _research(session, user_message)
-        session.profile = await _profile(session, user_message)
+        session.trip_message = session.trip_message or user_message
+        session.research_text, session.citations = await _research(session, session.trip_message)
+        session.profile = await _profile(session, session.trip_message)
     elif session.questions_asked:
         session.answers.append(user_message)
 
@@ -1098,6 +1247,9 @@ async def _continue(session: ConversationSession, user_message: str, result: Tur
     # re-picks from scratch: observed live, a cycling jacket came back as a HIKING
     # jacket and $99.99 became $248.99 because the customer gave a size. Only after
     # the answer is filed, so the fall-through path still sees it.
+    if (fast := await _drop(session, user_message, result)) is not None:
+        return fast
+
     if (fast := await _resize(session, user_message, result)) is not None:
         return fast
 
@@ -1119,8 +1271,12 @@ async def _continue(session: ConversationSession, user_message: str, result: Tur
         if questions:
             result.questions = questions
             result.stage = "questions"
+            # The headline only. Dumping the whole report put five sourced sections —
+            # elevation, temperature, rainfall, terrain, hazards — in front of someone
+            # who has asked one question and been asked three back. The detail is on
+            # the session and reaches `_present`; the trace has all of it.
             result.text = (
-                f"{session.research_text}\n\n"
+                f"{_headline(session.research_text)}\n\n"
                 f"That gives me {len(session.slots)} things to cover: "
                 + ", ".join(s.name for s in session.slots)
                 + ".\n\nBefore I pick real products:\n"
