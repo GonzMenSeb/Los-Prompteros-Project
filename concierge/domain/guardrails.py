@@ -507,20 +507,27 @@ def find_unbacked_claims(
 # projector: "a wide temperature jump from to, high UV index levels". The claim going
 # and the reasoning staying is the design; the connector that pointed AT the claim is
 # neither, and has to go with it.
+# Every excision leaves this marker behind, so the mender can tell a connector whose
+# object was cut from one that was always there. Unanchored, the same patterns eat
+# valid prose nowhere near a claim: "conditions you should plan around." loses its
+# "around", "the range you are training at." loses its "at". `\x00` cannot appear in
+# model prose and is stripped before the text is returned.
+_CUT = "\x00"
+_GAP = r"[\s\x00]"
 _DANGLING = (
-    # "from to" / "between and" / "of up to" — a connector run with nothing between.
-    (re.compile(r"\b(?:from|between|of|at|around|near|up\s+to|down\s+to|over|under)"
-                r"(?:\s+(?:to|and|from))+(?=[\s,;.:]|$)", re.I), ""),
-    # A connector left pointing at punctuation or the end of the sentence.
-    (re.compile(r"\s\b(?:from|to|between|of|at|around|near|over|under|reaching|rated)"
-                r"(?=\s*[,;.:]|\s*$)", re.I), ""),
+    # A connector run whose object was cut: "from <cut> to <cut>," or "to <cut>,".
+    re.compile(rf"\b(?:from|between|of|at|around|near|up{_GAP}+to|down{_GAP}+to|over|under|to)"
+               rf"(?:{_GAP}+(?:to|and|from))*{_GAP}*(?=[\s,;.:]|$)", re.I),
+    # A verb left pointing straight at one: "gusts reaching <cut>,".
+    re.compile(rf"\s\b(?:reaching|rated){_GAP}*(?=[\s,;.:]|$)", re.I),
 )
 
 
 def _mend(text: str) -> str:
     out = text
-    for pattern, repl in _DANGLING:
-        out = pattern.sub(repl, out)
+    for pattern in _DANGLING:
+        out = pattern.sub(lambda m: "" if _CUT in m.group(0) else m.group(0), out)
+    out = out.replace(_CUT, "")
     out = re.sub(r"\s+([.,;:])", r"\1", out)
     out = re.sub(r"([,;:])\s*(?=[,;:.])", "", out)
     return re.sub(r"\s{2,}", " ", out)
@@ -538,7 +545,7 @@ def scrub_prose(text: str, items: Sequence[Any], *, allowed_minor: Iterable[int]
 
     out = text
     for c in sorted(claims, key=lambda c: c.start, reverse=True):
-        out = out[: c.start] + out[c.end :]
+        out = out[: c.start] + _CUT + out[c.end :]
     out = re.sub(r"\s+([.,;:])", r"\1", _WS.sub(" ", out))
     out = _mend(out)
     out = re.sub(r"^[\s,;:.]+", "", out).strip()

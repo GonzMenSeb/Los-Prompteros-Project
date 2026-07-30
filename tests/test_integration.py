@@ -1561,6 +1561,28 @@ class TestTheKitCanShrinkAndTheCartExplainsItself:
         loop = _mod("concierge.agent.loop")
         assert loop._lines_named(self._kit(), message) == []
 
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "I have shoes but they are worn out",
+            "I have shoes that are falling apart, need new ones",
+            "my old socks give me blisters, I have socks but they are bad",
+        ],
+    )
+    def test_owning_a_worn_out_thing_is_a_reason_to_buy_it_not_to_drop_it(self, message):
+        """`_drop` is the one path that REMOVES from the cart, so its cue has to mean
+        "don't add this". "I already have shoes" does. A bare "I have shoes" does not —
+        the rest of that sentence is usually the reason they need new ones, and dropping
+        the line silently deletes exactly what they were asking for. Spanish already drew
+        this line: `ya tengo` is a cue and a bare `tengo` is not."""
+        loop = _mod("concierge.agent.loop")
+        assert not loop._DROP_CUE.search(message)
+
+    def test_already_having_it_is_still_a_cue(self):
+        loop = _mod("concierge.agent.loop")
+        for message in ("I already have shoes", "remove the cap", "ya tengo botas", "drop the socks"):
+            assert loop._DROP_CUE.search(message), message
+
     def test_a_word_shared_by_the_whole_kit_identifies_nothing(self):
         """"drop the running belt" must not empty a kit where every line says
         "running"."""
@@ -1763,6 +1785,16 @@ class TestItDoesNotClaimWhatItDoesNotKnow:
         ).startswith("To get you started")
         # A sentence that merely contains a greeting word is left alone.
         kept = "Hydration matters here. Hi-vis is not needed on park paths."
+        assert loop._strip_greeting(kept) == kept
+
+    def test_hi_vis_is_a_product_category_not_a_greeting(self):
+        """`\\b` puts a boundary between "Hi" and the hyphen, so a reply that OPENS on
+        hi-vis — a Decathlon running category, in a conversation about running — lost
+        its whole first sentence. The safe position is the one already covered; this is
+        the one the regex is anchored to."""
+        loop = _mod("concierge.agent.loop")
+
+        kept = "Hi-vis matters on these roads. The shell handles the wind."
         assert loop._strip_greeting(kept) == kept
 
     def test_naming_the_lines_is_enough_to_count_as_a_size_answer(self):

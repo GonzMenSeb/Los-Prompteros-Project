@@ -3,12 +3,14 @@ from __future__ import annotations
 import pytest
 
 from concierge.domain.guardrails import (
+    _mend,
     check_budget,
     check_coverage,
     check_open_questions,
     check_provenance,
     check_query_shape,
     check_size_confirmation,
+    check_sole_sizes,
     check_stock,
     check_substitution,
     find_unbacked_claims,
@@ -569,6 +571,41 @@ class TestCheckQueryShape:
         assert guardrail_events(sink) == []
 
 
+class TestMendingOnlyRepairsWhereSomethingWasCut:
+    """Excising a claim leaves the preposition that introduced it — observed live on a
+    projector: "a wide temperature jump from to". Repairing that is right; repairing
+    prose that was never cut is how a sentence loses a word it needed."""
+
+    @pytest.mark.parametrize(
+        "damaged,mended",
+        [
+            ("a wide temperature jump from \x00 to \x00, high UV", "a wide temperature jump, high UV"),
+            ("rated to \x00, so it copes", "rated, so it copes"),
+            ("gusts reaching \x00, so the shell matters", "gusts, so the shell matters"),
+            ("a jump of \x00. Pack layers.", "a jump. Pack layers."),
+        ],
+    )
+    def test_a_connector_whose_object_was_cut_goes_with_it(self, damaged, mended):
+        assert _mend(damaged) == mended
+
+    @pytest.mark.parametrize(
+        "prose",
+        [
+            "Pick the conditions you should plan around.",
+            "That is the temperature range you will be training at.",
+            "It covers the range you are aiming at, and the wind.",
+            "This is the terrain the shoe is rated for.",
+            "Everything here is what the forecast points to.",
+        ],
+    )
+    def test_prose_nowhere_near_a_cut_is_left_alone(self, prose):
+        """These are the sentences the unanchored version silently truncated."""
+        assert _mend(prose) == prose
+
+    def test_the_marker_never_reaches_the_customer(self):
+        assert "\x00" not in _mend("a range of \x00 and \x00 degrees, roughly")
+
+
 class TestTheCuesAreCuesAndNotCommonWords:
     """`check_open_questions` reads the customer's own words, so a false cue silences an
     ask forever. The bias toward silence is deliberate — a LOOSE answer counts. A word
@@ -630,6 +667,7 @@ class TestEveryVerdictIsTraceable:
         scrub_prose("Rated to −5 °C.", [item()])
         check_query_shape("sleeping bag 0 degrees celsius")
         check_open_questions(Kit(items=[item()]), 1, "two nights hiking")
+        check_sole_sizes([item(sole_size=True)])
 
         assert {e.event for e in guardrail_events(sink)} == {
             "guardrail.coverage",
@@ -641,4 +679,5 @@ class TestEveryVerdictIsTraceable:
             "guardrail.prose",
             "guardrail.query_shape",
             "guardrail.open_questions",
+            "guardrail.sole_size",
         }

@@ -94,6 +94,9 @@ class TurnResult(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
     questions: list[Question] = Field(default_factory=list)
     corrects_premise: bool = False
+    # The correction arrived after MAX_REBUILDS. It is refused, not ignored — the
+    # customer has to be told the kit did not move and why.
+    premise_change_refused: bool = False
     open_questions: list[OpenQuestion] = Field(default_factory=list)
     offer_cart: bool = False
     error: str = ""
@@ -877,8 +880,12 @@ async def _present(session: ConversationSession, kit: Kit, allowed_minor: list[i
 # three turns running. The prompt now says not to, but a prompt is a suggestion — this
 # is the part that holds. Only ever removes a LEADING greeting, so a sentence that
 # happens to contain "hi" mid-paragraph is untouched.
+# `(?![-\w])` rather than `\b`: a word boundary sits between "Hi" and the hyphen, so
+# "Hi-vis matters on these roads." — a Decathlon running category, opening a reply in a
+# conversation about running — read as a greeting and lost the whole sentence.
 _GREETING = re.compile(
-    r"^(?:hi|hey|hello|welcome(?:\s+(?:to|back))?|great|good\s+news|congratulations)\b[^.!?]*[.!?]\s*",
+    r"^(?:hi|hey|hello|welcome(?:\s+(?:to|back))?|great|good\s+news|congratulations)"
+    r"(?![-\w])[^.!?]*[.!?]\s*",
     re.I,
 )
 
@@ -1064,10 +1071,16 @@ def _wants_resize(session: ConversationSession, message: str, result: TurnResult
 
 # "I already have shoes" and "drop the hat" are the same instruction: this line should
 # not be in the cart. There was no route for either — the kit only ever grew.
+# A bare "I have shoes" is NOT here, and the Spanish side already drew that line —
+# `ya tengo` is a cue, a bare `tengo` is not. "I have shoes but they are worn out" is
+# the reason they need new ones, and this is the one path that removes from the cart:
+# a wrong cue here silently deletes exactly what they asked for. "already" is what
+# turns owning something into an instruction not to add it.
 _DROP_CUE = re.compile(
     r"\b(remove|drop|delete|take (?:it )?out|take off|lose|skip|without|no need|"
     r"don'?t need|do not need|don'?t want|already (?:have|own|got)|"
-    r"i (?:have|own|got)|quita(?:r)?|ya tengo|no necesito|sin)\b",
+    r"i (?:have|own|got) (?:my own|one|some|those|these|that|it)\b|"
+    r"quita(?:r)?|ya tengo|no necesito|sin)\b",
     re.I,
 )
 # Brand and category words repeat across a running kit, so they identify nothing.
@@ -1285,12 +1298,20 @@ async def _continue(session: ConversationSession, user_message: str, result: Tur
     # A correction to the trip itself invalidates everything derived from it. Without
     # this the customer says "that's not in Canada", the agent agrees in prose, and
     # hands back a kit still sized to Canadian summer — observed live.
-    if (
-        session.profile is not None
-        and result.corrects_premise
-        and session.rebuilds < MAX_REBUILDS
-    ):
-        _rebuild_premise(session, user_message)
+    if session.profile is not None and result.corrects_premise:
+        if session.rebuilds < MAX_REBUILDS:
+            _rebuild_premise(session, user_message)
+        else:
+            # The cap is a real limit, not a reason to go quiet. Silently ignoring the
+            # third correction is the same failure this whole branch is about: the
+            # customer says the premise is wrong and the kit comes back unchanged with
+            # nothing saying why.
+            emit(
+                "guardrail.premise_change_refused",
+                {"rebuilds": session.rebuilds, "correction": user_message[:160]},
+                level="guardrail",
+            )
+            result.premise_change_refused = True
 
     if session.profile is None:
         session.trip_message = session.trip_message or user_message
@@ -1348,8 +1369,16 @@ async def _continue(session: ConversationSession, user_message: str, result: Tur
     result.citations = session.citations
     result.kit, result.unservable_slots = kit, unservable
     result.open_questions = _open_questions(session, kit)
+    refused = (
+        "I've already rebuilt this twice from corrections, so I've left the trip as it "
+        "stands rather than starting again — this kit is still built on that. Start a "
+        "fresh conversation if the trip itself is different.\n\n"
+        if result.premise_change_refused
+        else ""
+    )
     result.text = (
-        await _present(session, kit, _disclosure_figures(kit))
+        refused
+        + await _present(session, kit, _disclosure_figures(kit))
         + "\n\n"
         + _disclosures(kit, session.unchecked_slots, result.open_questions)
     ).strip()

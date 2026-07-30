@@ -1029,3 +1029,37 @@ run before this one, the *same* research prompt that invented "the Edmonton 10K"
 opened with *"No specific geographic location is provided."* Same prompt, same model,
 opposite behaviour, one night apart. That is what a prompt is worth on its own, and why
 every one of these has a deterministic half behind it.
+
+Review of the two entries above.
+
+**`_drop` is the one path that removes from the cart, so its cue has to mean "do not
+add this".** `i (?:have|own|got)` did not. *"I have shoes but they are worn out"*,
+*"I have shoes that are falling apart"* and *"my old socks give me blisters, I have
+socks but they are bad"* all dropped the line — the rest of each sentence is the reason
+they need a new one, and the system deleted exactly what they were asking for. The
+Spanish side had already drawn the line correctly: `ya tengo` is a cue and a bare
+`tengo` is not. English now matches it — "already", or an explicit object ("I have my
+own boots"), and a bare "I have X" falls through to the model.
+
+**The mender repaired prose that was never cut.** `_mend` ran its patterns over the
+whole text, so *"conditions you should plan around."* lost its "around" and *"the range
+you are training at."* lost its "at" — valid sentences nowhere near an excision, in the
+guardrail whose entire job is not leaving broken grammar on a projector. Each excision
+now leaves a `\x00` marker and a connector is only removed when the marker is inside the
+match. Every repair in the entry above still fires; none of the false strips do.
+
+**The rebuild cap went quiet.** Past `MAX_REBUILDS` the correction was dropped with no
+event and no sentence — the customer says the premise is wrong for a third time and the
+kit comes back unchanged, which is the exact failure the `corrects_premise` work was
+about. It now emits `guardrail.premise_change_refused` and says the trip was left as it
+stands.
+
+**"Hi-vis" is a product category.** `\b` sits between "Hi" and the hyphen, so a reply
+OPENING on *"Hi-vis matters on these roads."* — a Decathlon running category, in a
+conversation about running — read as a greeting and lost the whole sentence. The
+existing test put "Hi-vis" in the second sentence, which is the one position the
+leading-anchored pattern can never reach. `(?![-\w])` instead of `\b`.
+
+Registered in SPEC.md §6.1: `check_sole_sizes`, `_drop`, and the premise rebuild.
+`check_sole_sizes` also joins `test_all_guardrails_emit_at_guardrail_level`, whose
+exact-set assertion is the real registry and did not know it existed.
