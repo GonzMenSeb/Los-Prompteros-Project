@@ -224,4 +224,16 @@ def _banner() -> rx.Component:
 
 
 def walkthrough_bar() -> rx.Component:
-    return rx.cond(State.walkthrough_active, _banner(), _controls())
+    """The RUNNING banner is for everyone — an audience watching a scripted demo should
+    see it is scripted. The CONTROLS are presenter chrome: "Step 1 of 2 · refusal ·
+    grounded research · live kit" is operator jargon, and measured at 414px it pushed
+    the product's own explanation to 582px behind a panel nobody else can act on.
+
+    Shown to the presenting laptop, which already identifies itself with `?vip=<token>`,
+    and to anyone running locally with no token configured — otherwise `make walkthrough`
+    would lose its own button."""
+    return rx.cond(
+        State.walkthrough_active,
+        _banner(),
+        rx.cond(State.is_presenter, _controls(), rx.fragment()),
+    )

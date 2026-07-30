@@ -60,8 +60,15 @@ equipped correctly. Search the web.
 TRIP: {message}
 {extra}
 
+FIRST, decide whether the customer actually named a place. If they did not, DO NOT \
+PICK ONE. Never name a city, region, country or specific event they did not \
+mention: research the ACTIVITY in general instead, say plainly that no location \
+was given, and give ranges rather than a forecast. Inventing "the Edmonton 10K" \
+for someone who said "a 10 kilometre race" is the worst thing you can do here — \
+everything downstream is then sized for weather they will never run in.
+
 Find and state, with the source for each:
-  * where this actually is, and the elevation in metres;
+  * where this is, and the elevation in metres — ONLY if they named the place;
   * the temperature range in DEGREES CELSIUS at that elevation for the current \
 season, including the overnight low;
   * rainfall, fog and humidity typical of the season;
@@ -69,9 +76,15 @@ season, including the overnight low;
   * the hazards that change what you pack (wind chill, sun at altitude, river \
 crossings, sudden fog, altitude sickness).
 
-Report in compact prose, under 250 words. Give numbers, not adjectives. If a \
-number is unavailable, say you are estimating and from what. Recommend no \
-products — this step is conditions only."""
+FORMAT, and this matters — the first paragraph is the only part the customer \
+reads:
+  * Open with ONE paragraph of at most 45 words naming only the two or three \
+conditions that change what they should pack. No headings, no sources in it.
+  * Then a blank line, then the detail with a source per claim.
+
+Under 250 words total. Give numbers, not adjectives. If a number is unavailable, \
+say you are estimating and from what. Recommend no products — this step is \
+conditions only."""
 
 
 PROFILE_PROMPT = """Convert the research below into one structured activity profile.
@@ -251,8 +264,17 @@ SLOTS WE COULD NOT CHECK — Decathlon rate-limited us. These may well be in sto
 we simply do not know.
 {unchecked}
 
+THIS IS KIT NUMBER {kit_number} IN THIS CONVERSATION.
+
 RULES
-  * 120-180 words. Open with the two or three conditions that drove the kit.
+  * If that number is above 1 you have already met this person. Do NOT greet them, \
+do NOT welcome them, do NOT use their name, and do NOT re-explain the trip. Open \
+with what CHANGED since the last kit and nothing else. Repeating "Welcome to \
+running, Simon!" on every message is the single fastest way to look like a bot.
+  * State NOTHING about the customer they did not tell you — not their level, \
+their goal, their gender, how long they will be out, or what they own. If you \
+need it, it is a question, not a fact.
+  * 80-140 words. Open with the two or three conditions that drove the kit.
   * Do not list prices, sizes or a total — those render as cards beside your \
 message. Do not repeat every product title either.
   * State NO specification that is not in a product title. No temperature \

@@ -769,3 +769,297 @@ Also: `model.retry` was in neither status map, so three Gemini 503 backoffs cost
 ~10 s and ~18 s of silence in that same run. It is a throttle, not a stage, and gets
 its own wording — the other two blame Decathlon, which had nothing to do with it.
 
+
+### 2026-07-29 · The guided-demo controls belong to the presenter, not the audience
+
+`walkthrough_bar` rendered for everyone. Measured at 414px, the panel ran from 224px to
+about 560px and the product did not explain itself until 582px — so a third of a phone
+screen was a control panel for a scripted demo the viewer is not running, captioned
+"Step 1 of 2 · refusal · grounded research · live kit". With it gated, the hero starts
+at **319px**.
+
+Gated on `is_presenter`, which is `is_vip or not VIP_TOKEN`: the presenting laptop
+already identifies itself with `?vip=<token>`, and with no token configured nobody is
+being gated at all, so local dev and `make walkthrough` keep their button. The RUNNING
+banner still shows to everyone — an audience watching a scripted demo is entitled to
+see that it is scripted.
+
+Three smaller ones from the same review, all of them the same shape: **the system knew
+something and did not say it.**
+
+"Start over" wiped messages, kit, trace and cart on one click, from a control that is
+icon-only below `md` — a mis-tap ending three minutes of live API calls mid-pitch. It
+now asks, but **only when there is something to lose**: `has_anything_to_lose` keeps a
+fresh page clearing in one click, so the confirmation never becomes furniture people
+learn to click through.
+
+Nothing said how long the first answer takes. It is ~52 s of measured model latency and
+ran 80 s in one live bundle, so the only evidence a first-timer had that waiting was
+correct behaviour was a spinner.
+
+`_BudgetExceeded` told the customer to "start a fresh conversation" — but `result.kit`
+stays None on that path, so state keeps the kit already on screen and the cart button
+still works. The text was sending people to destroy a working kit for nothing.
+
+And the question stage runs once and never asks again, so a customer who answered some
+of it lost the rest in silence. Sizes already had a way back. A budget did not: the kit
+said "No budget set." — a fact, with no offer of the way out. `_disclosures` now adds
+one. Party size and existing kit still have no route back, and nothing re-runs the
+question stage; recorded as partly closed rather than closed.
+
+Recorded because it corrects an earlier entry in this file: the "parsers are keyed to
+English" finding was **already closed** when it was written up. `presupuesto`, `hasta`,
+`dólares` and `tallas?` were all present. It was written from reading the code once and
+not checked; checking it is what showed otherwise. Now pinned by tests so it stays true.
+
+### 2026-07-29 · Ask what is still unknown, every turn, and stop when it is answered
+
+The question stage runs once. `questions_asked` latches, and `QUESTION_PROMPT` says so
+in as many words: *"AT MOST 4 questions, all in this one turn. Never ask again later."*
+So a customer who answered two of four had the other two assumed, silently, forever.
+
+The obvious fix — let the model ask again — is the wrong shape twice over. It spends a
+model call to re-derive something already knowable, and a prompt instruction to ask
+"only if still missing" is a suggestion, which this project does not accept as a
+guardrail.
+
+`check_open_questions` is the deterministic version. It takes the kit, the party size,
+and **everything the customer typed**, and returns what is still being assumed. It runs
+on every turn that produces a kit, so an ask that is answered simply stops appearing —
+which is what keeps a standing offer from becoming a nag, without any state tracking
+which question was asked when.
+
+`party_size` is the one that needed the customer's own words rather than the model's
+output. `ActivityProfile.party_size` defaults to **1**, so an assumed 1 and a stated 1
+are byte-identical in the profile. The only evidence a default was chosen rather than
+defaulted is that they said so, hence the cue scan over `trip_message + answers`.
+
+Bias is deliberately toward silence: a loose match counts as ANSWERED. Under-asking is
+a smaller harm than pestering somebody who already replied. That is why the live
+bundle's *"I have no clothes for that"* closes the existing-kit question — it is an
+answer, and a stricter matcher would have gone on asking.
+
+Recorded because it is the same trap a teammate caught in `_STAGE_STATUS` earlier the
+same day, and I nearly walked into it again: **fixture mode never reaches `_continue`**,
+so wiring this only into the live path would have left it dead in exactly the mode that
+runs on stage without Gemini quota. `_refresh_open_asks` covers the fixture, deriving
+party size from the kit's own person ordinals.
+
+The asks also reach the confirm bar, not just the prose — same reasoning as the size
+ask before them: prose scrolls away and the button that spends money does not.
+
+### 2026-07-29 · A cue has to be about the thing, not merely contain a common word
+
+Review of the entry above. The bias toward silence is right and stays; the cues that
+implemented it were not cues. `_PARTY_CUE` matched a bare `both`, and *"My size is XL in
+both"* is a verbatim live message from earlier the same day — recorded higher up this
+file. A customer answering the size question therefore silenced the party question, for
+the rest of the conversation, with the words the size question asked for.
+
+`_OWNED_CUE` matched a bare `have`, `has`, `got`, `already`, `nothing`. So *"what do I
+have to buy?"* read as *"I already own things"* — the exact opposite of what was said.
+`"I have a trip to the páramo"`, `"I have never camped before"`, `"I already booked the
+flights"` and `"nothing fancy, just something warm"` all closed the existing-kit
+question too. `said` is every message the customer has ever sent, so the longer someone
+talks the likelier an accidental cue, and the asks quietly stop for good.
+
+An ownership verb now needs something ownable within three words (`_GEAR`, or
+`nothing`/`nada`), `already` needs a verb after it, and `both` became `both of us` /
+`us both`. `we|us|our` stay loose on purpose: `_refresh_open_asks` derives party size
+from `person_indexes`, which `models.py` documents as empty for a party of one **or a
+shared kit**, so a three-person all-shared kit derives 1 and the cue scan is the only
+thing standing between that and a wrong ask.
+
+Two wiring holes from the same review:
+
+**`result.kit is None` does not mean there is no kit.** It means this turn did not build
+one. A redirect, a rate limit, and the model-call budget stop all leave the previous kit
+on screen, and `awaiting_confirmation` deliberately keeps the confirm bar up — the same
+`_BudgetExceeded` path that now says *"the kit above is still good"*. The asks were
+cleared at the start of the turn and never restored, so the button that spends money
+stopped disclosing what it assumed. It falls back to `_refresh_open_asks`.
+
+**The fixture emitted its guardrail event after the last drain of the turn**, so
+`guardrail.open_questions` never reached the trace panel in the mode that runs on stage.
+`_fixture_resize` drains after its own emits; `_fixture_turn` did not.
+
+A third, found by re-checking a claim rather than a line of code: the **injection reply
+computed the asks and threw them away.** It sets `result.kit = session.kit` and
+`offer_cart`, so it is a kit turn with the confirm bar standing — but it passed
+`_open_questions(...)` straight into `_disclosures` without ever assigning
+`result.open_questions`, which `_live_turn` is what reads. The prose listed all three
+assumptions and the button that spends money listed none. Assigned once and reused, so
+the two cannot drift apart again.
+
+### 2026-07-29 · The last three from the live bundle: ask, do not guess; fail loudly, not silently
+
+Three items noted in the run bundle and left unfixed because none had an obvious safe
+answer. All three turned out to have one.
+
+**A party of one was handed a Women's cycling jacket and a Men's base layer.** Retrieval
+guarantees the products are REAL; nothing guaranteed they were for the same person. The
+tempting fix — drop the odd one out on a title match — throws away a good product over a
+word, so this became an open question instead: it asks, and the ask disappears when the
+kit stops being mixed. `\b` is the whole defence in the matcher, because "Women's"
+contains "men's"; there is a test for exactly that.
+
+**`set_backend(stubs)` ran at module import and emitted.** So every live run opened with
+`tools.backend backend=concierge.agent.stubs`, and a real decision was indistinguishable
+in the trace from a fallback nobody chose. Worse, the fallback was SILENT: forget
+`set_backend(catalog)` and the loop builds a kit out of fixture data while claiming to be
+live — which `AGENTS.md` calls the one failure that would invalidate the demo. The
+fallback stays, because tests and scripts rely on it, but it no longer announces itself
+as a choice, and using it without choosing it now emits `guardrail.backend_not_chosen` at
+error level the first time a tool actually serves data.
+
+**Citations rendered as opaque `vertexaisearch` redirects.** `GroundingChunkWeb` carries
+a `domain` alongside `title`, and it was being dropped. The title now falls back to the
+domain rather than to an empty chip, and the domain renders beside it — the `href` is a
+redirect, so naming the destination is the only way a customer can see where a link goes
+before clicking it. That is a trust fix, not decoration.
+
+Review of the entry above, three things:
+
+**The gender matcher missed the products it was written for.** `\b` was the documented
+defence and it is correct — but the pattern was keyed to `'` (U+0027) alone, and
+Decathlon sends both apostrophes. `Quechua Men’s MH500 Half-Zip Hiking Fleece` and
+`Quechua Men’s MH500 Warm Water-Repellent Hiking Fleece Jacket` are in
+`fixtures/collection_hiking-fleeces-mid-layers.json` exactly as the feed returns them,
+with U+2019, and both read as **unisex**. So a Men’s fleece beside a Women's jacket did
+not flag. Swept all 60 fixture titles before and after: men's 30 → **32**, women's 20,
+matching **both** still 0, women's-read-as-men's still 0. The `\b` test now uses one of
+those real titles, since a test built from a hand-typed title is what let this through.
+
+**The fixture dropped the citation domain.** `DEMO_CITATIONS` was `(title, url)`, so
+every fixture chip had `domain=""` and the new label rendered on the live path only —
+in the mode that runs on stage once Gemini quota is gone. The same trap
+`_refresh_open_asks` exists to avoid, one PR later. It is a 3-tuple now, with one
+consumer updated and a test pinning it.
+
+**Two tests asserted source text where the behaviour was directly observable.** The
+backend one checked `"if not chosen:" in src and "return" in src` — `return` is in
+almost every function — and now asserts that an unchosen `_bind` emits no
+`tools.backend` while `set_backend` emits exactly one. The citation one asserted that a
+pydantic field round-trips; the actual claim, that a chunk with no title falls back to
+its domain and then to `"source"`, had no test and now has one driven through
+`_research` with real `types.GroundingChunkWeb` objects. Both were coverage gaps, not
+defects — the code was already right.
+
+### 2026-07-30 · A correction has to reach the profile, and the kit has to be able to shrink
+
+From a live run. The customer said *"I wanna start to make running with a 10 kilometers
+race"* and got back a research report on **Edmonton, Alberta**, with elevation, forecast
+and seven citations. They never mentioned Canada. `RESEARCH_PROMPT` told the model to
+find *"where this actually is"* with no way to answer "they did not say", so it picked
+somewhere.
+
+They corrected it: *"I aint searching a race in Canada"*. The trace for that turn has no
+`research.grounded`, no `profile.built`, no `slots.derived` — `_continue` only researches
+`if session.profile is None`, and it never becomes None again. **The kit came back still
+sized to Edmonton's summer**: the correction was agreed with in prose and changed nothing.
+
+So the gate now returns `corrects_premise`, and a true verdict throws the profile, the
+slots and the research away and rebuilds. It is capped at two per session: a rebuild is
+three model calls and about forty seconds. The correction is APPENDED to the trip rather
+than replacing it — "not in Canada" is not a trip on its own.
+
+The prompt is also told, first thing, not to name a place the customer did not: research
+the ACTIVITY and give ranges. That is a suggestion, not a guarantee, which is why the
+`corrects_premise` rebuild exists behind it.
+
+Same run, second complaint: the reply was a wall. Five sourced sections — elevation,
+temperature, rainfall, terrain, hazards — in front of someone who had asked one question
+and was about to be asked three back. The research prompt now leads with a ≤45-word
+paragraph and only that reaches the chat; `_headline` falls back to a hard truncation
+rather than to the whole report, because a model that ignores the format rule must not
+be able to dump five sections into the conversation.
+
+Two smaller ones from the same bundle. `scrub_prose` excised a claim and left the
+preposition that introduced it — *"a wide temperature jump from to"*, on a projector; the
+connector that pointed AT the claim now goes with it. And a pair of running shorts
+arrived in **3XL** with nothing said, because one available variant sets `sized=False`,
+which suppresses the size question. No question was owed — there was no choice — but the
+fact was still theirs, so `sole_size` now carries it to a disclosure.
+
+Finally, the kit could only ever grow. There was no way to say "I already have shoes" or
+"drop the hat". `_drop` is the mirror of `_resize`: deterministic, zero model calls,
+removes only what the message actually names. A token shared by most of the kit
+("running") identifies nothing and is discarded before matching, or "drop the running
+belt" would empty the cart; a message that would empty the kit falls through instead,
+because that is never what "I already have shoes" meant.
+
+And because a second link supersedes the first with no way to tell what moved,
+`confirm_cart` now diffs the lines against the last cart and says so, then closes by
+telling the customer to open the cart and check it before paying. The link is the
+handover, not a receipt.
+
+
+### 2026-07-30 · Left out is not sold out, and it had already met you
+
+From the run of 02:29Z. Three things, and the one the customer did not report is the
+worst.
+
+**It invented an inventory fact to explain its own choice.** The customer said *"only
+t-shirt and shoes"*. `_select` picked two, and every OTHER slot fell through
+`for slot in session.slots: if slot.name not in filled: unservable.append(...)` — and
+`_disclosures` renders that list as **"Not stocked right now"**. So the reply said
+Decathlon does not stock running socks, while the same socks were in the previous kit
+and came back in the next one. There are three different facts here and they are now
+kept apart all the way to the page: **not stocked** (evidence: an empty collection, a
+`no_stock` pick, or the size ceiling), **could not check** (rate-limited), and **not
+chosen** (nobody picked it — usually because the customer narrowed the kit). Only the
+first is an inventory claim, and it is now the only one that makes one.
+
+**It greeted the customer on every single message.** *"Welcome to running, Simon!"*
+opened three consecutive replies. The prompt now carries the kit number and a rule, but
+the rule is a suggestion — `_strip_greeting` is the part that holds, and it iterates,
+because the observed opening was two greetings in a row (*"Hi Simon! Welcome to
+running."*). It only ever removes a LEADING greeting sentence, so "Hi-vis is not needed"
+mid-paragraph survives.
+
+**A size answer that named its lines fell through to a rebuild.** *"Send me the link
+with the same shoes and t-shirt in L siza please"* carries a size and points straight at
+the kit, but the cue word was a typo and the sentence was long, so `_wants_resize`
+rejected it — and the full rebuild then re-added two products the customer had just
+narrowed away. Naming a kit line is now a third way in, alongside the cue word and the
+sizes-and-nothing-else test.
+
+Recorded because it settles an argument this file has been having with itself: in the
+run before this one, the *same* research prompt that invented "the Edmonton 10K" instead
+opened with *"No specific geographic location is provided."* Same prompt, same model,
+opposite behaviour, one night apart. That is what a prompt is worth on its own, and why
+every one of these has a deterministic half behind it.
+
+Review of the two entries above.
+
+**`_drop` is the one path that removes from the cart, so its cue has to mean "do not
+add this".** `i (?:have|own|got)` did not. *"I have shoes but they are worn out"*,
+*"I have shoes that are falling apart"* and *"my old socks give me blisters, I have
+socks but they are bad"* all dropped the line — the rest of each sentence is the reason
+they need a new one, and the system deleted exactly what they were asking for. The
+Spanish side had already drawn the line correctly: `ya tengo` is a cue and a bare
+`tengo` is not. English now matches it — "already", or an explicit object ("I have my
+own boots"), and a bare "I have X" falls through to the model.
+
+**The mender repaired prose that was never cut.** `_mend` ran its patterns over the
+whole text, so *"conditions you should plan around."* lost its "around" and *"the range
+you are training at."* lost its "at" — valid sentences nowhere near an excision, in the
+guardrail whose entire job is not leaving broken grammar on a projector. Each excision
+now leaves a `\x00` marker and a connector is only removed when the marker is inside the
+match. Every repair in the entry above still fires; none of the false strips do.
+
+**The rebuild cap went quiet.** Past `MAX_REBUILDS` the correction was dropped with no
+event and no sentence — the customer says the premise is wrong for a third time and the
+kit comes back unchanged, which is the exact failure the `corrects_premise` work was
+about. It now emits `guardrail.premise_change_refused` and says the trip was left as it
+stands.
+
+**"Hi-vis" is a product category.** `\b` sits between "Hi" and the hyphen, so a reply
+OPENING on *"Hi-vis matters on these roads."* — a Decathlon running category, in a
+conversation about running — read as a greeting and lost the whole sentence. The
+existing test put "Hi-vis" in the second sentence, which is the one position the
+leading-anchored pattern can never reach. `(?![-\w])` instead of `\b`.
+
+Registered in SPEC.md §6.1: `check_sole_sizes`, `_drop`, and the premise rebuild.
+`check_sole_sizes` also joins `test_all_guardrails_emit_at_guardrail_level`, whose
+exact-set assertion is the real registry and did not know it existed.

@@ -503,6 +503,36 @@ def find_unbacked_claims(
     return claims
 
 
+# Excising the claim leaves the preposition that introduced it. Observed live, on a
+# projector: "a wide temperature jump from to, high UV index levels". The claim going
+# and the reasoning staying is the design; the connector that pointed AT the claim is
+# neither, and has to go with it.
+# Every excision leaves this marker behind, so the mender can tell a connector whose
+# object was cut from one that was always there. Unanchored, the same patterns eat
+# valid prose nowhere near a claim: "conditions you should plan around." loses its
+# "around", "the range you are training at." loses its "at". `\x00` cannot appear in
+# model prose and is stripped before the text is returned.
+_CUT = "\x00"
+_GAP = r"[\s\x00]"
+_DANGLING = (
+    # A connector run whose object was cut: "from <cut> to <cut>," or "to <cut>,".
+    re.compile(rf"\b(?:from|between|of|at|around|near|up{_GAP}+to|down{_GAP}+to|over|under|to)"
+               rf"(?:{_GAP}+(?:to|and|from))*{_GAP}*(?=[\s,;.:]|$)", re.I),
+    # A verb left pointing straight at one: "gusts reaching <cut>,".
+    re.compile(rf"\s\b(?:reaching|rated){_GAP}*(?=[\s,;.:]|$)", re.I),
+)
+
+
+def _mend(text: str) -> str:
+    out = text
+    for pattern in _DANGLING:
+        out = pattern.sub(lambda m: "" if _CUT in m.group(0) else m.group(0), out)
+    out = out.replace(_CUT, "")
+    out = re.sub(r"\s+([.,;:])", r"\1", out)
+    out = re.sub(r"([,;:])\s*(?=[,;:.])", "", out)
+    return re.sub(r"\s{2,}", " ", out)
+
+
 def scrub_prose(text: str, items: Sequence[Any], *, allowed_minor: Iterable[int] = ()) -> str:
     """Excise unbacked spec claims from model prose. Detection is the deliverable —
     the claim phrase goes, the surrounding reasoning stays."""
@@ -515,8 +545,9 @@ def scrub_prose(text: str, items: Sequence[Any], *, allowed_minor: Iterable[int]
 
     out = text
     for c in sorted(claims, key=lambda c: c.start, reverse=True):
-        out = out[: c.start] + out[c.end :]
+        out = out[: c.start] + _CUT + out[c.end :]
     out = re.sub(r"\s+([.,;:])", r"\1", _WS.sub(" ", out))
+    out = _mend(out)
     out = re.sub(r"^[\s,;:.]+", "", out).strip()
 
     emit(
@@ -575,3 +606,125 @@ def check_query_shape(q: str) -> str:
     if shaped != _normalise(q).strip():
         emit("guardrail.query_shape", {"original": q, "shaped": shaped, "empty": not shaped}, "guardrail")
     return shaped
+
+
+# The question stage runs once and latches (`questions_asked`), and its own prompt says
+# "Never ask again later" — so anything the customer did not answer was assumed, once,
+# forever, and silently. These are the assumptions worth surfacing, derived from data
+# rather than re-asked by the model: they disappear the moment the answer arrives, which
+# is what keeps a standing offer from turning into nagging.
+#
+# Bias is deliberately toward staying quiet. A cue that the customer TOLD us something
+# counts as answered even if loosely matched: under-asking is a smaller harm than
+# pestering someone who already replied. A common word is not a loose answer though —
+# a cue has to be ABOUT the party or ABOUT owning gear, or the ask is silenced by
+# language nobody meant as an answer, forever, which is the defect this replaced.
+_PARTY_CUE = re.compile(
+    # "both" alone was a live regression: "My size is XL in both" is two garments.
+    r"\b(we|us|our|ourselves|both of us|us both|couple|group|family|friends?|team|"
+    r"my (wife|husband|girlfriend|boyfriend|partner|son|daughter|kids?|child|mum|mom|dad|brother|sister)|"
+    r"\d+\s*(people|persons|adults|of us)|"
+    r"nosotros|mi (esposa|esposo|novia|novio|pareja|hijo|hija)|amigos?|familia|pareja)\b",
+    re.I,
+)
+# Gear, so an ownership verb has something to own. A bare "have" is not a cue —
+# "what do I have to buy?" is the opposite of an answer.
+_GEAR = (
+    r"(gear|kit|equipment|clothes|clothing|boots|shoes|jackets?|trousers|pants|"
+    r"pack|backpack|tent|sleeping bags?|bag|helmet|gloves|"
+    r"ropa|equipo|botas|zapatos|chaquetas?|carpa|casco|guantes)"
+)
+_OWNS = r"(own|owns|have|has|had|got|bring|bringing|tengo|tenemos|traigo)"
+_OWNED_CUE = re.compile(
+    rf"\balready\s+{_OWNS}\b"
+    rf"|\b{_OWNS}\s+(\w+\s+){{0,3}}({_GEAR}|nothing|none|nada|ninguno)\b"
+    rf"|\bno\s+{_GEAR}\b",
+    re.I,
+)
+
+
+# `\b` is what makes these safe: in "Women's" the character before "men" is a word
+# character, so the men's pattern cannot match inside the women's one. Verified against
+# all 60 titles in `fixtures/`: 32 men's, 20 women's, and NOTHING matches both.
+# The apostrophe class is not optional. Decathlon sends both forms — U+2019 in
+# "Quechua Men’s MH500 Half-Zip Hiking Fleece" — and keying on U+0027 alone read those
+# as unisex, so the check quietly did nothing on the products it was written for.
+_MENS = re.compile(r"\b(?:men|man)['’]?s\b", re.I)
+_WOMENS = re.compile(r"\b(?:women|woman)['’]?s\b|\bladies\b", re.I)
+
+
+class OpenQuestion(BaseModel):
+    key: str
+    ask: str
+
+
+def check_open_questions(kit: Kit, party_size: int, said: str) -> list[OpenQuestion]:
+    """What the kit is still assuming about this customer.
+
+    `said` is everything they typed — the trip description plus every answer — because
+    the only evidence that a default was CHOSEN rather than defaulted is that they said
+    so. `ActivityProfile.party_size` defaults to 1, which makes an assumed 1 and a
+    stated 1 identical in the model.
+    """
+    open_: list[OpenQuestion] = []
+
+    if kit.items and kit.budget_minor is None:
+        open_.append(
+            OpenQuestion(
+                key="budget",
+                ask="You haven't given me a budget — say one and I'll tell you straight away "
+                "if this kit goes past it.",
+            )
+        )
+    if party_size <= 1 and not _PARTY_CUE.search(said):
+        open_.append(
+            OpenQuestion(
+                key="party_size",
+                ask="I've built this for one person. Tell me if anyone else is going and I'll "
+                "size a set for each of them.",
+            )
+        )
+    if kit.items and not _OWNED_CUE.search(said):
+        open_.append(
+            OpenQuestion(
+                key="existing_kit",
+                ask="If you already own any of this, tell me which and I'll drop those lines "
+                "rather than sell them to you twice.",
+            )
+        )
+
+    # Observed live: a party of ONE was handed a Women's cycling jacket and a Men's base
+    # layer. Nothing checked it, and nothing could — retrieval guarantees the products
+    # are real, not that they are for the same person. Asking beats guessing: dropping
+    # one on a title match would throw away a good product over a word.
+    titles = " | ".join(i.product_title for i in kit.items)
+    if party_size <= 1 and _MENS.search(titles) and _WOMENS.search(titles):
+        open_.append(
+            OpenQuestion(
+                key="gendered_mix",
+                ask="Some of these are men's and some are women's, and this kit is for one "
+                "person. Tell me which you want and I'll swap the odd ones out.",
+            )
+        )
+
+    emit(
+        "guardrail.open_questions",
+        {"open": [q.key for q in open_], "party_size": party_size},
+        "guardrail",
+    )
+    return open_
+
+
+def check_sole_sizes(items: Sequence[KitItem]) -> list[str]:
+    """A line the customer was never asked about because there was nothing to ask —
+    one size left in stock. No question was owed, but the fact is still theirs: a live
+    run put a 3XL pair of running shorts in a kit and said nothing at all."""
+    lines = [
+        f"{i.product_title}: {i.size_label} is the only size left in stock, so that is "
+        "what I put in — not a size I picked for you."
+        for i in items
+        if i.sole_size
+    ]
+    if lines:
+        emit("guardrail.sole_size", {"count": len(lines)}, "guardrail")
+    return lines

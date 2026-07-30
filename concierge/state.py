@@ -164,6 +164,7 @@ def _reset_session(token: str) -> None:
 class Citation(BaseModel):
     title: str
     url: str
+    domain: str = ""
 
 
 class ChatMessage(BaseModel):
@@ -302,6 +303,15 @@ class State(rx.State):
     error: str = ""
 
     is_vip: bool = False
+
+    confirming_clear: bool = False
+
+    # What the kit is still assuming about this customer, from check_open_questions.
+    open_asks: list[str] = []
+
+    # Title + size of every line in the LAST cart handed over, so a second link can
+    # say what moved rather than leaving the customer to diff two Decathlon pages.
+    last_cart_lines: list[str] = []
 
     # Every handler that spends a Gemini call or touches Decathlon re-checks this, as
     # `GATE_ON and not self.unlocked`. Conditional rendering is not a guard — the events
@@ -465,6 +475,39 @@ class State(rx.State):
         sink.clear()
         return True
 
+    def _cart_lines(self) -> list[str]:
+        return [f"{i.product_title} — {i.size_label}" for i in self.kit_items]
+
+    def _cart_changes(self) -> list[str]:
+        """What moved between the last link and this one. Nothing on the first cart —
+        there is no "changed" without a previous."""
+        if not self.last_cart_lines:
+            return []
+        now, before = self._cart_lines(), self.last_cart_lines
+        added = [x for x in now if x not in before]
+        gone = [x for x in before if x not in now]
+        return [f"• added: {x}" for x in added] + [f"• removed: {x}" for x in gone]
+
+    def _remember_cart_lines(self) -> None:
+        self.last_cart_lines = self._cart_lines()
+
+    def _refresh_open_asks(self) -> None:
+        """Fixture mode never reaches `_continue`, so the live path's call to
+        `check_open_questions` would leave these empty in exactly the mode that runs on
+        stage. Party size comes off the kit's own person ordinals — the fixture is two
+        people and says so through them."""
+        from concierge.domain.guardrails import check_open_questions
+        from concierge.domain.models import Kit
+
+        said = " ".join(m.content for m in self.messages if m.role == "user")
+        party = max((i for it in self.kit_items for i in it.person_indexes), default=1)
+        kit = Kit(
+            items=list(self.kit_items),
+            unservable_slots=list(self.unservable_slots),
+            budget_minor=self.budget_minor,
+        )
+        self.open_asks = [q.ask for q in check_open_questions(kit, party, said)]
+
     def _apply_kit(self, kit) -> None:
         self.kit_items = list(kit.items)
         self.unservable_slots = list(kit.unservable_slots)
@@ -605,7 +648,32 @@ class State(rx.State):
         self.gate_busy = False
         yield
 
+    @rx.var
+    def has_open_asks(self) -> bool:
+        return bool(self.open_asks)
+
+    @rx.var
+    def is_presenter(self) -> bool:
+        """No VIP token configured means nobody is being gated — local dev and
+        `make walkthrough` must keep their controls."""
+        return self.is_vip or not VIP_TOKEN
+
+    @rx.var
+    def has_anything_to_lose(self) -> bool:
+        """Whether "Start over" would actually destroy something. A kit costs three
+        minutes of live API calls to rebuild, and the control is icon-only below md."""
+        return bool(self.messages or self.kit_items or self.trace)
+
+    def ask_to_clear(self):
+        self.confirming_clear = True
+
+    def cancel_clear(self):
+        self.confirming_clear = False
+
     def clear(self):
+        self.confirming_clear = False
+        self.open_asks = []
+        self.last_cart_lines = []
         _reset_session(self.router.session.client_token)
         self.messages = []
         self.kit_items = []
@@ -640,6 +708,10 @@ class State(rx.State):
         # No timed reset: Reflex holds the session state lock for a handler's duration,
         # so sleeping to clear a badge would serialize that session's other events.
         self._reset_copy()
+        self.open_asks = []
+        # Sending a message is an implicit Keep. Left standing, the header sits in
+        # Erase/Keep over a run the customer has since added to.
+        self.confirming_clear = False
         self.messages.append(ChatMessage(role="user", content=text))
         self.is_thinking = True
         self.status = "Reading the conditions…"
@@ -710,6 +782,13 @@ class State(rx.State):
                 yield
             return
 
+        # Same reasoning as the resize above: the fixture is what runs on stage when
+        # quota is gone, so "I already have the tent" has to work there too.
+        if self.kit_items and self._fixture_drop_lines(text):
+            async for _ in self._fixture_drop(sink, text):
+                yield
+            return
+
         for event, payload, level in demo_data.demo_trace():
             emit(event, payload, level)
             await asyncio.sleep(_STEP_DELAY)
@@ -717,11 +796,62 @@ class State(rx.State):
             yield
 
         self._apply_kit(demo_data.demo_kit())
+        self._refresh_open_asks()
+        # Its guardrail event is emitted after the loop above drained for the last time,
+        # so without this the audit rail never gets the row. `_fixture_resize` drains
+        # after its own emits for the same reason.
+        self._drain(sink)
         self.messages.append(
             ChatMessage(
                 role="assistant",
                 content=demo_data.DEMO_MESSAGES[1][1],
-                citations=[Citation(title=t, url=u) for t, u in demo_data.DEMO_CITATIONS],
+                citations=[Citation(title=t, url=u, domain=d) for t, u, d in demo_data.DEMO_CITATIONS],
+            )
+        )
+        self.awaiting_confirmation = True
+        yield
+
+    def _fixture_drop_lines(self, text: str) -> list[int]:
+        """Which kit lines this message names. Reuses the live matcher rather than
+        growing a second one — a fixture that behaves differently from the live path
+        is how the demo starts lying again."""
+        from concierge.agent.loop import _DROP_CUE, _lines_named
+        from concierge.domain.models import Kit
+
+        if not _DROP_CUE.search(text) or demo_data.sizes_in(text):
+            return []
+        hit = _lines_named(Kit(items=list(self.kit_items), unservable_slots=[]), text)
+        # Emptying the kit is never what "I already have boots" meant.
+        return [] if len(hit) == len(self.kit_items) else hit
+
+    async def _fixture_drop(self, sink: list[TraceEvent], text: str):
+        hit = set(self._fixture_drop_lines(text))
+        dropped = [i for n, i in enumerate(self.kit_items) if n in hit]
+        emit(
+            "guardrail.lines_dropped",
+            {"dropped": [i.product_title for i in dropped], "kept": len(self.kit_items) - len(hit)},
+            level="guardrail",
+        )
+        await asyncio.sleep(_STEP_DELAY)
+        self._drain(sink)
+        yield
+
+        self.kit_items = [i for n, i in enumerate(self.kit_items) if n not in hit]
+        self._refresh_open_asks()
+        emit("kit.assembled", {"items": len(self.kit_items), "substitutions": self.substitution_count})
+        self._drain(sink)
+        yield
+
+        lines = "\n".join(f"• {i.product_title} — {i.size_label}" for i in dropped)
+        plural = "s" if len(dropped) > 1 else ""
+        self.messages.append(
+            ChatMessage(
+                role="assistant",
+                content=(
+                    f"Taken out of the kit, {len(dropped)} line{plural}:\n\n{lines}\n\n"
+                    "Say the word if you want any of them back. Build the cart again "
+                    "and you'll get a fresh link without them."
+                ),
             )
         )
         self.awaiting_confirmation = True
@@ -753,6 +883,7 @@ class State(rx.State):
             yield
 
         self._apply_kit(kit)
+        self._refresh_open_asks()
         still = check_size_confirmation(self.kit_items)
         emit(
             "guardrail.size_confirmed",
@@ -824,11 +955,22 @@ class State(rx.State):
             self._apply_kit(result.kit)
 
         self.unservable_slots = list(result.unservable_slots or self.unservable_slots)
+        # Prose scrolls away; the confirm bar does not. Same reasoning as the size ask.
+        if result.kit is not None:
+            self.open_asks = [q.ask for q in result.open_questions]
+        elif self.kit_items:
+            # No kit from THIS turn is not no kit: a redirect, a rate limit or the model
+            # call budget running out all leave the previous one on screen with the
+            # confirm bar up, and `awaiting_confirmation` below deliberately keeps it
+            # there. Dropping the asks would take them off the button that spends money
+            # for the rest of the session.
+            self._refresh_open_asks()
+            self._drain(sink)
         self.messages.append(
             ChatMessage(
                 role="assistant",
                 content=result.text,
-                citations=[Citation(title=c.title, url=c.uri) for c in result.citations],
+                citations=[Citation(title=c.title, url=c.uri, domain=c.domain) for c in result.citations],
             )
         )
         # A redirect, a greeting or a failed turn produces no kit at all, and must not
@@ -886,16 +1028,27 @@ class State(rx.State):
             # The cart goes out with whatever sizes we have, but a line the customer
             # never sized is a wrong-fit return waiting to happen. Ask now, while the
             # cart is still editable, rather than letting them discover it at checkout.
+            parts = ["Your cart is live — the link is beside this message."]
+            # Second and later carts supersede the first, and the customer has no way
+            # to tell what moved between them unless we say. Computed from the lines,
+            # not narrated by the model.
+            changes = self._cart_changes()
+            if changes:
+                parts.append("What changed since the last link:\n" + "\n".join(changes))
+            self._remember_cart_lines()
+
             asks = check_size_confirmation(self.kit_items)
             if asks:
-                self.messages.append(
-                    ChatMessage(
-                        role="assistant",
-                        content="Your cart is live — the link is beside this message.\n\n"
-                        + "\n".join(asks)
-                        + "\n\nGive me the sizes and I'll rebuild the kit and hand you a new link.",
-                    )
-                )
+                parts.append("\n".join(asks))
+                parts.append("Give me the sizes and I'll rebuild the kit and hand you a new link.")
+
+            # The cart is editable at Decathlon and this is the last honest moment to
+            # say so: the link is the handover point, not a receipt.
+            parts.append(
+                "**Please open the cart and check it before you pay** — that it has "
+                "everything you want, in the sizes you want, and nothing you don't."
+            )
+            self.messages.append(ChatMessage(role="assistant", content="\n\n".join(parts)))
             self._drain(sink)
         except Exception as exc:
             emit("cart.error", {"error": repr(exc)}, level="error")

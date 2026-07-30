@@ -108,6 +108,11 @@ class KitItem(BaseModel):
     # "first available", which is how a 9.5 foot got a 7. Distinct from
     # `size_substituted`, which is a size that WAS asked for and was sold out.
     size_confirmed: bool = True
+    # The customer was never asked because there was nothing to ask — one size left in
+    # stock. That is NOT the same as a size they chose, and it reached a live run as a
+    # silent 3XL on a pair of running shorts. `size_confirmed` stays True (no question
+    # was owed); this is what makes it disclosable.
+    sole_size: bool = False
     # Which people this line is for, on a per-person slot in a party of more than one.
     # A LIST because `_merge_variants` folds two people onto one line when they take the
     # same variant, and a single value would have to be dropped there. Ordinals rather
@@ -130,6 +135,13 @@ class KitItem(BaseModel):
 class Kit(BaseModel):
     items: list[KitItem] = Field(default_factory=list)
     unservable_slots: list[str] = Field(default_factory=list)
+    # Slots nobody picked, as opposed to slots nothing was in stock for. Every unfilled
+    # slot used to land in `unservable_slots`, and the disclosure calls that list "not
+    # stocked right now" — so a customer who said "only a t-shirt and shoes" was told
+    # Decathlon does not stock socks, while the same socks sat in the previous kit and
+    # came back in the next one. An inventory claim we have no evidence for is the one
+    # thing this whole layer exists to prevent.
+    not_chosen: list[str] = Field(default_factory=list)
     budget_minor: int | None = None
 
     @property
@@ -200,6 +212,12 @@ class IntentVerdict(BaseModel):
     intent: Intent
     discipline: str | None = None
     reason: str = ""
+    # The customer contradicting something the profile was built ON — the place, the
+    # season, the distance, the party. Observed live: the agent invented a race in
+    # Edmonton, the customer said "I aint searching a race in Canada", and the kit was
+    # still sized to Edmonton's summer because research and profile only ever run on
+    # turn one. Adjusting a size or a budget is NOT this.
+    corrects_premise: bool = False
 
 
 class Question(BaseModel):
