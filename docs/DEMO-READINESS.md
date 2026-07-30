@@ -11,8 +11,15 @@ system already had.
 
 `DECISIONS.md` records calls that were made; this records ones that had not been.
 
-**Status.** The three P0s were fixed in `tell-the-user-what-broke`. Each is marked
-below. Everything in P1 and P2 is still open.
+**Status.** The three P0s were fixed in `tell-the-user-what-broke`. Every item below
+carries its own status in its heading.
+
+P1 and P2 were then closed in `polish-for-a-first-timer`, except **#4**, which is only
+partly closed: sizes and budget each have a way back now, but party size and existing
+kit do not, and nothing re-runs the question stage. Measured effect of #5: the hero
+moved from 582px to **319px** on a 414px phone. **#9 turned out to be already closed** —
+`presupuesto`, `hasta`, `dólares` and `tallas?` were all in the parsers; it was written
+up as open without checking, and checking it is what showed otherwise.
 
 A later live run exposed three more, all agent-side and all fixed in
 `answer-a-size-not-a-new-kit`: answering a size question rebuilt the whole kit with
@@ -149,7 +156,7 @@ guardrail instead of nothing.
 
 ## P1 — makes a first-timer stumble
 
-### 4. Four questions, one free-text field, never asked again
+### 4. Four questions, one free-text field, never asked again — PARTLY FIXED
 
 `prompts.py`:
 
@@ -165,7 +172,7 @@ unconfirmed sizes.
 PR #4 added a "Tell DecaBot my sizes" button, so *sizes* now have a route back.
 Party size, existing kit and budget do not.
 
-### 5. Presenter controls sit above the product for every user
+### 5. Presenter controls sit above the product for every user — FIXED
 
 `app.py` renders `concierge/ui/walkthrough.py`'s `walkthrough_bar()` unconditionally.
 Measured on a 414×896 phone at first load:
@@ -186,13 +193,13 @@ copy is operator jargon: *"Step 1 of 2 · refusal · grounded research · live k
 This is the right UI for the presenter on the build laptop. It is the wrong UI for
 the audience holding the QR code, and both get it.
 
-### 6. Nothing sets a time expectation
+### 6. Nothing sets a time expectation — FIXED
 
 Neither the hero nor the composer says the first answer takes about a minute. With
 finding 2, that leaves a first-timer no way to tell whether waiting is correct
 behaviour.
 
-### 7. "Start over" destroys a live run with no confirmation
+### 7. "Start over" destroys a live run with no confirmation — FIXED
 
 `State.clear` wipes `messages`, `kit_items`, `trace`, the cart and the walkthrough
 stage. The control is icon-only below `md`. One mis-tap on a phone ends a run that
@@ -202,15 +209,20 @@ took three minutes of live API calls — during a two-minute pitch.
 
 ## P2 — smaller risk
 
-### 8. The model-call budget ends a conversation with no way back
+### 8. The model-call budget ends a conversation with no way back — FIXED
 
 `MAX_MODEL_CALLS = 25`. A judge who explores conversationally can reach it, and the
 only offer is to start a fresh conversation — losing the kit they were looking at.
 
-### 9. The parsers are keyed to English words
+### 9. The parsers are keyed to English words — ALREADY CLOSED
 
-A Spanish-speaking judge in Medellín typing `presupuesto 900` gets no budget, and the
-size tokenizer only recognises Latin letter sizes and numbers.
+**The paragraph below was wrong when it was written, and is kept only so the correction
+has something to point at.** `_budget_minor` already had `presupuesto`, `hasta` and
+`dólares`, and `_SIZE_CUE` already had `tallas?`. It was written from reading the code
+once without running it. Tests now pin all four.
+
+~~A Spanish-speaking judge in Medellín typing `presupuesto 900` gets no budget, and the
+size tokenizer only recognises Latin letter sizes and numbers.~~
 
 The English UI itself is **correct and not a finding**: the agent-commerce layer
 exists only on Decathlon's US store, in USD, so an English product is the honest one.

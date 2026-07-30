@@ -765,6 +765,14 @@ def _disclosures(kit: Kit, unchecked: list[str] | None = None) -> str:
     # An empty kit with a budget is the nothing-fits case, not a cheap one — the
     # naive gap arithmetic reports "$40.00 under" on a kit containing nothing.
     lines.append(check_budget(kit).message)
+    # The question stage runs once and never asks again, so a customer who answered
+    # some of it lost the rest in silence. Sizes already have a way back; a budget had
+    # none, and "No budget set." states the fact without offering the way out.
+    if kit.budget_minor is None and kit.items:
+        lines.append(
+            "You haven't given me a budget — say one and I'll tell you straight away if this "
+            "kit goes past it."
+        )
     return "\n".join(lines)
 
 
@@ -864,9 +872,12 @@ async def run_turn(user_message: str, session: ConversationSession) -> TurnResul
             result = await _continue(session, user_message, result)
 
     except _BudgetExceeded:
+        # `result.kit` stays None, so state keeps the kit already on screen — the old
+        # wording implied it was gone and sent people to start over for nothing.
         result.text = (
             "I've hit my limit on model calls for this conversation — stopping here rather than "
-            "spinning. Start a fresh conversation and I'll pick it up from the trip description."
+            "spinning.\n\n**The kit above is still good**: the prices, the sizes and the cart "
+            "button all still work. Start a fresh conversation only if you want to change it."
         )
         result.stage, result.error = "limit", "model call budget exceeded"
     except Exception as exc:

@@ -78,6 +78,57 @@ def source_chip() -> rx.Component:
     )
 
 
+def start_over() -> rx.Component:
+    """Destroys a kit that took three minutes of live API calls, from a control that is
+    icon-only below md. It asks first — but only when there is something to lose, so a
+    fresh page still clears in one click."""
+    confirm = rx.hstack(
+        rx.text("Erase this?", size="2", weight="bold", color=INK, display=["none", "none", "block"]),
+        rx.button(
+            rx.text("Erase", size="2", weight="bold"),
+            on_click=State.clear,
+            aria_label="Yes, erase this conversation and the kit",
+            size="2",
+            min_height="44px",
+            cursor="pointer",
+            background=DANGER,
+            color=WHITE,
+            border_radius=RADIUS_PILL,
+            padding_x="0.9rem",
+        ),
+        rx.button(
+            rx.text("Keep", size="2", weight="medium"),
+            on_click=State.cancel_clear,
+            aria_label="Keep this conversation",
+            variant="outline",
+            size="2",
+            min_height="44px",
+            cursor="pointer",
+            color=INK,
+            border_radius=RADIUS_PILL,
+            padding_x="0.9rem",
+        ),
+        spacing="2",
+        align="center",
+    )
+    button = rx.button(
+        rx.icon("rotate-ccw", size=15),
+        rx.text("Start over", size="2", weight="medium", display=["none", "none", "block"]),
+        # Same trap as the composer's Send: the label is hidden below md.
+        on_click=rx.cond(State.has_anything_to_lose, State.ask_to_clear, State.clear),
+        aria_label="Start over",
+        variant="outline",
+        size="2",
+        min_height="44px",
+        cursor="pointer",
+        color=BRAND,
+        border_radius=RADIUS_PILL,
+        padding_x="0.9rem",
+        _hover={"background": TINT_2},
+    )
+    return rx.cond(State.confirming_clear, confirm, button)
+
+
 def header() -> rx.Component:
     return rx.hstack(
         brand.mark(),
@@ -94,20 +145,7 @@ def header() -> rx.Component:
         ),
         rx.spacer(),
         source_chip(),
-        rx.button(
-            rx.icon("rotate-ccw", size=15),
-            rx.text("Start over", size="2", weight="medium", display=["none", "none", "block"]),
-            on_click=State.clear,
-            # Same trap as the composer's Send: the label is hidden below md.
-            aria_label="Start over",
-            variant="outline",
-            size="2",
-            cursor="pointer",
-            color=BRAND,
-            border_radius=RADIUS_PILL,
-            padding_x="0.9rem",
-            _hover={"background": TINT_2},
-        ),
+        start_over(),
         role="banner",
         width="100%",
         align="center",
