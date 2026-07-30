@@ -660,6 +660,62 @@ Turn numbering in `turn.start` reads `turn=3` for the second exchange
 (`len(messages) // 2 + 1` counts an assistant message the fixture appends twice).
 Cosmetic, in the trace only, left alone.
 
+### 2026-07-29 · Merging to `main` deploys, and every image says which commit it is
+
+The trigger was a bug report that was not a bug. A live turn died on
+`429 Too Many Requests` from `/collections.json?limit=250` on 29 Jul — the exact failure
+`2d8a591` had fixed eight hours earlier. The fix was in `main` and had never been built:
+the host was still running the 28 Jul image. The only way to establish that was noticing
+the traceback named `HTTPStatusError`, which is **httpx's** class, and the shipped
+`catalog.py` is on `requests` and cannot raise it. A deployment whose contents can only
+be identified by forensics on an exception type is not a deployment.
+
+So: Jenkins job `decabot-deploy` on `*/main`, `infra/jenkins/Jenkinsfile` here, the job
+and its deploy-key credential in `vps-infrastructure`'s `casc.yml.j2`. This is the
+miplata/categorizer house pattern, and it fills a hole the infra repo already described
+— `roles/decabot/tasks/main.yml` used to end with "There is no Jenkins job for this
+service: build and push it by hand."
+
+**Every image is tagged `:<git-short-sha>` as well as `:latest`, and carries
+`org.opencontainers.image.revision`.** That label is the point of the whole change: it
+makes "which commit is live" a `docker inspect` away instead of an inference. It is also
+the rollback target — the deploy stage reads it off the running image before replacing
+it, and the health gate restores it if the new revision fails.
+
+**The path gate is on stages, not on tests.** The obvious reading of "only run what was
+touched" is per-test-file selection; measured, the offline suite is **276 tests in
+4.88 s**, of which ~0.6 s per file is interpreter startup. Selecting files saves about
+two seconds and risks the cross-module contract tests that pin the facts registry. The
+minutes are in the image build, so that is what is gated: a merge touching only `*.md`,
+`docs/`, `LICENSE` or `.github/` builds nothing and does not restart the live instance —
+three of the twelve commits before this one were exactly that. `tests/`, `fixtures/`,
+`scripts/` and `Makefile` run the suite and stop, because the `Dockerfile` does not copy
+them.
+
+**The build stage does not look like the sibling repos', and must not be made to.**
+miplata and categorizer use `docker build` + `docker push`; this one uses the `buildx`
+invocation from `DEPLOY.md` with `oci-mediatypes=true` and provenance/SBOM off. Zot
+rejects Docker v2 manifests with `415`, and it does so *after* every layer has uploaded,
+so the failure reads like a network problem rather than a format one. Whether the
+sibling repos get away with it on the same registry is unresolved and deliberately not
+relied upon here.
+
+**`pytest -m live` is a `booleanParam`, off by default.** The live suite hits Decathlon,
+and MCP recovery is ~48 minutes; the registry says the rate-limit tests are written to
+never induce one, and a per-merge live run would eventually contradict that.
+
+**Post-deploy verification is inline `curl`, not `tests/health-check.yml`.** The infra
+playbook already asserts `/ping` and the websocket for decabot, but running it would
+mean cloning `vps-infrastructure` and handing the vault password to a job that otherwise
+needs neither. The two checks are copied instead — including `--http1.1`, without which
+Traefik negotiates h2 and a healthy app answers `400 Invalid websocket upgrade`.
+
+**PR checks are GitHub Actions, and that is not a second deploy path.** A Jenkins job on
+`*/main` first sees a bad commit after it has landed, and merges happen in PRs. The
+offline suite needs no network and no secrets — verified by running it green in a clean
+clone with no `.env` — so a public-repo runner costs nothing and no VPS credential
+leaves our infrastructure. Deploy stays entirely on Jenkins.
+
 ### 2026-07-29 · Answering a question must not change the answer to a different one
 
 A live run: the customer typed *"My size is XL in both"*. They got a **hiking** jacket
@@ -712,3 +768,4 @@ replaying it.
 Also: `model.retry` was in neither status map, so three Gemini 503 backoffs cost ~30 s,
 ~10 s and ~18 s of silence in that same run. It is a throttle, not a stage, and gets
 its own wording — the other two blame Decathlon, which had nothing to do with it.
+
