@@ -264,8 +264,17 @@ SLOTS WE COULD NOT CHECK — Decathlon rate-limited us. These may well be in sto
 we simply do not know.
 {unchecked}
 
+THIS IS KIT NUMBER {kit_number} IN THIS CONVERSATION.
+
 RULES
-  * 120-180 words. Open with the two or three conditions that drove the kit.
+  * If that number is above 1 you have already met this person. Do NOT greet them, \
+do NOT welcome them, do NOT use their name, and do NOT re-explain the trip. Open \
+with what CHANGED since the last kit and nothing else. Repeating "Welcome to \
+running, Simon!" on every message is the single fastest way to look like a bot.
+  * State NOTHING about the customer they did not tell you — not their level, \
+their goal, their gender, how long they will be out, or what they own. If you \
+need it, it is a question, not a fact.
+  * 80-140 words. Open with the two or three conditions that drove the kit.
   * Do not list prices, sizes or a total — those render as cards beside your \
 message. Do not repeat every product title either.
   * State NO specification that is not in a product title. No temperature \

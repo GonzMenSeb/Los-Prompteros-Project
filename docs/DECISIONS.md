@@ -993,3 +993,39 @@ And because a second link supersedes the first with no way to tell what moved,
 telling the customer to open the cart and check it before paying. The link is the
 handover, not a receipt.
 
+
+### 2026-07-30 · Left out is not sold out, and it had already met you
+
+From the run of 02:29Z. Three things, and the one the customer did not report is the
+worst.
+
+**It invented an inventory fact to explain its own choice.** The customer said *"only
+t-shirt and shoes"*. `_select` picked two, and every OTHER slot fell through
+`for slot in session.slots: if slot.name not in filled: unservable.append(...)` — and
+`_disclosures` renders that list as **"Not stocked right now"**. So the reply said
+Decathlon does not stock running socks, while the same socks were in the previous kit
+and came back in the next one. There are three different facts here and they are now
+kept apart all the way to the page: **not stocked** (evidence: an empty collection, a
+`no_stock` pick, or the size ceiling), **could not check** (rate-limited), and **not
+chosen** (nobody picked it — usually because the customer narrowed the kit). Only the
+first is an inventory claim, and it is now the only one that makes one.
+
+**It greeted the customer on every single message.** *"Welcome to running, Simon!"*
+opened three consecutive replies. The prompt now carries the kit number and a rule, but
+the rule is a suggestion — `_strip_greeting` is the part that holds, and it iterates,
+because the observed opening was two greetings in a row (*"Hi Simon! Welcome to
+running."*). It only ever removes a LEADING greeting sentence, so "Hi-vis is not needed"
+mid-paragraph survives.
+
+**A size answer that named its lines fell through to a rebuild.** *"Send me the link
+with the same shoes and t-shirt in L siza please"* carries a size and points straight at
+the kit, but the cue word was a typo and the sentence was long, so `_wants_resize`
+rejected it — and the full rebuild then re-added two products the customer had just
+narrowed away. Naming a kit line is now a third way in, alongside the cue word and the
+sizes-and-nothing-else test.
+
+Recorded because it settles an argument this file has been having with itself: in the
+run before this one, the *same* research prompt that invented "the Edmonton 10K" instead
+opened with *"No specific geographic location is provided."* Same prompt, same model,
+opposite behaviour, one night apart. That is what a prompt is worth on its own, and why
+every one of these has a deterministic half behind it.

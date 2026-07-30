@@ -135,6 +135,13 @@ class KitItem(BaseModel):
 class Kit(BaseModel):
     items: list[KitItem] = Field(default_factory=list)
     unservable_slots: list[str] = Field(default_factory=list)
+    # Slots nobody picked, as opposed to slots nothing was in stock for. Every unfilled
+    # slot used to land in `unservable_slots`, and the disclosure calls that list "not
+    # stocked right now" — so a customer who said "only a t-shirt and shoes" was told
+    # Decathlon does not stock socks, while the same socks sat in the previous kit and
+    # came back in the next one. An inventory claim we have no evidence for is the one
+    # thing this whole layer exists to prevent.
+    not_chosen: list[str] = Field(default_factory=list)
     budget_minor: int | None = None
 
     @property

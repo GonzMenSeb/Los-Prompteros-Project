@@ -123,6 +123,9 @@ class ConversationSession:
     # three model calls and about forty seconds, and a conversation that keeps
     # contradicting itself must not be able to spend the turn budget on it.
     rebuilds: int = 0
+    # How many kits this customer has already been shown. A prompt rule alone did not
+    # stop "Welcome to running, Simon!" opening every single message.
+    kits_presented: int = 0
 
     def transcript(self, limit: int = 6) -> str:
         return "\n".join(f"{t['role']}: {t['text'][:400]}" for t in self.turns[-limit:])
@@ -752,11 +755,22 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
     backend.bind_too_far(None)
     items = _merge_variants(items)
     filled = {i.slot for i in items}
-    for slot in session.slots:
-        if slot.name not in filled:
-            unservable.append(slot.name)
+    # `unservable` so far holds only slots with EVIDENCE — the model declared them, or a
+    # pick came back with no stock, or the size ceiling refused every variant. A slot
+    # that is merely unfilled has none of that: the model just did not pick it, usually
+    # because the customer narrowed the kit. Calling that "not stocked" invents an
+    # inventory fact, which is exactly what this layer exists to stop.
+    evidenced = set(unservable)
+    not_chosen = [s.name for s in session.slots if s.name not in filled and s.name not in evidenced]
+    if not_chosen:
+        emit("guardrail.slots_not_chosen", {"slots": not_chosen}, level="guardrail")
     unservable = [reasons.get(s, s) for s in dict.fromkeys(unservable) if s not in filled]
-    kit = Kit(items=items, unservable_slots=unservable, budget_minor=_budget_minor(session))
+    kit = Kit(
+        items=items,
+        unservable_slots=unservable,
+        not_chosen=not_chosen,
+        budget_minor=_budget_minor(session),
+    )
     emit(
         "kit.built",
         {
@@ -808,6 +822,13 @@ def _disclosures(
             + " — they rate-limited me there, which is not the same as being sold out. "
             "Ask me again and I'll retry."
         )
+    # Left out, not sold out. Three different facts, kept apart all the way to the page.
+    if kit.not_chosen:
+        lines.append(
+            "I left these out rather than guess: "
+            + ", ".join(kit.not_chosen)
+            + ". Say the word and I'll add any of them."
+        )
     # An empty kit with a budget is the nothing-fits case, not a cheap one — the
     # naive gap arithmetic reports "$40.00 under" on a kit containing nothing.
     lines.append(check_budget(kit).message)
@@ -841,12 +862,39 @@ async def _present(session: ConversationSession, kit: Kit, allowed_minor: list[i
             ),
             unservable=json.dumps([s for s in kit.unservable_slots if s not in unread]) or "[]",
             unchecked=json.dumps(unread) or "[]",
+            kit_number=session.kits_presented + 1,
         ),
         config=_cfg(),
     )
+    session.kits_presented += 1
     # The one guardrail with no structural equivalent: retrieval stops invented
     # PRODUCTS, nothing stops invented PROPERTIES of real ones.
-    return scrub_prose((r.text or "").strip(), kit.items, allowed_minor=allowed_minor)
+    text = scrub_prose((r.text or "").strip(), kit.items, allowed_minor=allowed_minor)
+    return _strip_greeting(text) if session.kits_presented > 1 else text
+
+
+# Observed live: "Welcome to running, Simon!" opened the reply to every single message,
+# three turns running. The prompt now says not to, but a prompt is a suggestion — this
+# is the part that holds. Only ever removes a LEADING greeting, so a sentence that
+# happens to contain "hi" mid-paragraph is untouched.
+_GREETING = re.compile(
+    r"^(?:hi|hey|hello|welcome(?:\s+(?:to|back))?|great|good\s+news|congratulations)\b[^.!?]*[.!?]\s*",
+    re.I,
+)
+
+
+def _strip_greeting(text: str) -> str:
+    # Iterated, because the observed opening was TWO of them: "Hi Simon! Welcome to
+    # running." Capped so a paragraph of nothing but greetings cannot empty the reply.
+    out, removed = text, 0
+    while removed < 3:
+        stripped = _GREETING.sub("", out, count=1).lstrip()
+        if stripped == out or not stripped:
+            break
+        out, removed = stripped, removed + 1
+    if removed:
+        emit("guardrail.greeting_stripped", {"removed": removed}, level="guardrail")
+    return out or text
 
 
 def _headline(research: str) -> str:
@@ -1006,7 +1054,12 @@ def _wants_resize(session: ConversationSession, message: str, result: TurnResult
     # A message that is nothing but sizes is a size answer. Anything longer has to say
     # so — a word count would let "make it 3 people" through on length alone.
     only_sizes = not _JOINER.sub(" ", _SIZE_TOKEN.sub(" ", message)).strip()
-    return tokens if (_SIZE_CUE.search(message) or only_sizes) else []
+    # Or it can name the lines it is talking about. "the same shoes and t-shirt in L
+    # siza please" carries a size and points at the kit, but the cue word is a typo and
+    # the sentence is long — observed live falling through to a full rebuild, which then
+    # re-added two products the customer had just narrowed away.
+    names_a_line = bool(session.kit and _lines_named(session.kit, message))
+    return tokens if (_SIZE_CUE.search(message) or only_sizes or names_a_line) else []
 
 
 # "I already have shoes" and "drop the hat" are the same instruction: this line should

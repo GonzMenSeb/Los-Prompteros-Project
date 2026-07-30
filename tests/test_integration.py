@@ -1726,6 +1726,78 @@ class TestTheAsksReachEveryPathThatLeavesAKitOnScreen:
         assert "guardrail.open_questions" in [e.event for e in state.trace]
 
 
+class TestItDoesNotClaimWhatItDoesNotKnow:
+    """From the run of 2026-07-30T02:29Z. The customer said "only t-shirt and shoes"
+    and was told Decathlon does not stock socks — while the same socks sat in the
+    previous kit and came back in the next one."""
+
+    def test_a_slot_nobody_picked_is_not_reported_as_out_of_stock(self):
+        from concierge.domain.models import Kit
+
+        loop = _mod("concierge.agent.loop")
+        from tests.conftest import item as make_item
+
+        kit = Kit(
+            items=[make_item(slot="Running Top")],
+            unservable_slots=["Running Shorts"],
+            not_chosen=["Running Socks"],
+            budget_minor=None,
+        )
+        text = loop._disclosures(kit)
+
+        assert "Not stocked right now: Running Shorts." in text
+        assert "Running Socks" not in text.split("Not stocked right now:")[1].split("\n")[0]
+        assert "left these out rather than guess: Running Socks" in text
+
+    def test_the_greeting_only_survives_the_first_kit(self):
+        """"Welcome to running, Simon!" opened the reply to every message, three turns
+        running. A prompt rule is a suggestion; this is the part that holds."""
+        loop = _mod("concierge.agent.loop")
+
+        assert loop._strip_greeting(
+            "Welcome to running, Simon! To help you start out, I built a starter kit."
+        ).startswith("To help you start out")
+        # The observed opening was TWO greetings, so one pass was not enough.
+        assert loop._strip_greeting(
+            "Hi Simon! Welcome to running. To get you started, I tailored a setup."
+        ).startswith("To get you started")
+        # A sentence that merely contains a greeting word is left alone.
+        kept = "Hydration matters here. Hi-vis is not needed on park paths."
+        assert loop._strip_greeting(kept) == kept
+
+    def test_naming_the_lines_is_enough_to_count_as_a_size_answer(self):
+        """"the same shoes and t-shirt in L siza please" carries a size and points at the
+        kit, but the cue word is a typo and the sentence is long. It fell through to a
+        full rebuild, which re-added two products the customer had just narrowed away."""
+        from concierge.domain.models import Kit
+
+        loop = _mod("concierge.agent.loop")
+        from tests.conftest import item as make_item
+
+        kit = Kit(
+            items=[
+                make_item(slot="Road Running Shoes", product_title="Kiprun Kipride Men's Running Shoes"),
+                # As it stood after turn 3: L was out of stock and it went to S.
+                make_item(
+                    slot="Moisture-Wicking Running Top",
+                    product_title="Kiprun Men's Run 500 Dry Running T-shirt",
+                    size_substituted=True,
+                ),
+            ],
+            unservable_slots=[],
+            budget_minor=90_000,
+        )
+        session = loop.ConversationSession(kit=kit, questions_asked=True)
+        result = loop.TurnResult(intent="clarify")
+
+        assert loop._wants_resize(
+            session, "Send me the link with the same shoes and t-shirt in L siza please", result
+        ) == ["L"]
+        # Still no over-triggering on numbers that are not sizes.
+        assert loop._wants_resize(session, "make it 3 people", result) == []
+        assert loop._wants_resize(session, "give me something cheaper in L", result) == []
+
+
 class TestASizeAnswerDoesNotRebuildTheKit:
     """Observed live: the customer typed "My size is XL in both" and got a HIKING
     jacket where a cycling jacket had been, and $248.99 where $99.99 had been. They
