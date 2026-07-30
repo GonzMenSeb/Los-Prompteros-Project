@@ -375,6 +375,7 @@ green if `commerce/` changed · `DECISIONS.md` appended if architectural.
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) | The hosted instance: how to ship a change, rotate the password, verify. |
 | [`docs/HANDOFF.md`](docs/HANDOFF.md) | State of the build — resume from this file alone. |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Append-only architectural log. |
+| [`docs/WORKING-WITH-A-SECOND-AGENT.md`](docs/WORKING-WITH-A-SECOND-AGENT.md) | Two sessions on one tree: the six defects a reviewing session caught, and the rules that stopped collisions. |
 | [`docs/research/`](docs/research/) | **Archived pre-build research. Outranked by this file.** |
 
 `docs/research/` is provenance, not documentation. It records what was measured before
