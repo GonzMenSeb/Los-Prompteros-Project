@@ -847,3 +847,38 @@ party size from the kit's own person ordinals.
 
 The asks also reach the confirm bar, not just the prose — same reasoning as the size
 ask before them: prose scrolls away and the button that spends money does not.
+
+### 2026-07-29 · A cue has to be about the thing, not merely contain a common word
+
+Review of the entry above. The bias toward silence is right and stays; the cues that
+implemented it were not cues. `_PARTY_CUE` matched a bare `both`, and *"My size is XL in
+both"* is a verbatim live message from earlier the same day — recorded higher up this
+file. A customer answering the size question therefore silenced the party question, for
+the rest of the conversation, with the words the size question asked for.
+
+`_OWNED_CUE` matched a bare `have`, `has`, `got`, `already`, `nothing`. So *"what do I
+have to buy?"* read as *"I already own things"* — the exact opposite of what was said.
+`"I have a trip to the páramo"`, `"I have never camped before"`, `"I already booked the
+flights"` and `"nothing fancy, just something warm"` all closed the existing-kit
+question too. `said` is every message the customer has ever sent, so the longer someone
+talks the likelier an accidental cue, and the asks quietly stop for good.
+
+An ownership verb now needs something ownable within three words (`_GEAR`, or
+`nothing`/`nada`), `already` needs a verb after it, and `both` became `both of us` /
+`us both`. `we|us|our` stay loose on purpose: `_refresh_open_asks` derives party size
+from `person_indexes`, which `models.py` documents as empty for a party of one **or a
+shared kit**, so a three-person all-shared kit derives 1 and the cue scan is the only
+thing standing between that and a wrong ask.
+
+Two wiring holes from the same review:
+
+**`result.kit is None` does not mean there is no kit.** It means this turn did not build
+one. A redirect, a rate limit, and the model-call budget stop all leave the previous kit
+on screen, and `awaiting_confirmation` deliberately keeps the confirm bar up — the same
+`_BudgetExceeded` path that now says *"the kit above is still good"*. The asks were
+cleared at the start of the turn and never restored, so the button that spends money
+stopped disclosing what it assumed. It falls back to `_refresh_open_asks`.
+
+**The fixture emitted its guardrail event after the last drain of the turn**, so
+`guardrail.open_questions` never reached the trace panel in the mode that runs on stage.
+`_fixture_resize` drains after its own emits; `_fixture_turn` did not.

@@ -768,6 +768,10 @@ class State(rx.State):
 
         self._apply_kit(demo_data.demo_kit())
         self._refresh_open_asks()
+        # Its guardrail event is emitted after the loop above drained for the last time,
+        # so without this the audit rail never gets the row. `_fixture_resize` drains
+        # after its own emits for the same reason.
+        self._drain(sink)
         self.messages.append(
             ChatMessage(
                 role="assistant",
@@ -879,6 +883,14 @@ class State(rx.State):
         # Prose scrolls away; the confirm bar does not. Same reasoning as the size ask.
         if result.kit is not None:
             self.open_asks = [q.ask for q in result.open_questions]
+        elif self.kit_items:
+            # No kit from THIS turn is not no kit: a redirect, a rate limit or the model
+            # call budget running out all leave the previous one on screen with the
+            # confirm bar up, and `awaiting_confirmation` below deliberately keeps it
+            # there. Dropping the asks would take them off the button that spends money
+            # for the rest of the session.
+            self._refresh_open_asks()
+            self._drain(sink)
         self.messages.append(
             ChatMessage(
                 role="assistant",

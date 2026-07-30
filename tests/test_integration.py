@@ -1399,6 +1399,66 @@ class TestTheFirstTimerPolish:
         assert loop._SIZE_CUE.search("mi talla es XL")
 
 
+class TestTheAsksReachEveryPathThatLeavesAKitOnScreen:
+    """`result.kit is None` does not mean there is no kit — it means this turn did not
+    build one. State keeps the previous kit and `awaiting_confirmation` deliberately
+    stays up, so the confirm bar renders with the same assumptions and must still say
+    so."""
+
+    def _state(self):
+        mod = _mod("concierge.state")
+        return mod, mod.State(_reflex_internal_init=True)
+
+    def test_a_turn_that_builds_no_kit_keeps_the_asks_on_the_one_still_showing(self, monkeypatch):
+        """A redirect, a rate limit, or the model-call budget running out. That last one
+        now tells the customer "the kit above is still good" — with the asks dropped, the
+        button it points at silently stops saying what it is assuming."""
+        mod, state = self._state()
+        loop = _mod("concierge.agent.loop")
+
+        # Skips the public-key rotation, whose pool is empty outside a configured demo.
+        state.is_vip = True
+        state.kit_items = [item()]
+        state.budget_minor = None
+        state.messages = [mod.ChatMessage(role="user", content="two nights in the páramo")]
+
+        async def builds_no_kit(text, session):
+            return loop.TurnResult(text="Not something I can help with.", stage="redirect")
+
+        monkeypatch.setattr(loop, "run_turn", builds_no_kit)
+
+        async def drive():
+            async for _ in mod.State._live_turn(state, [], "what about swimming?"):
+                pass
+
+        asyncio.run(drive())
+        assert state.awaiting_confirmation is True, "precondition: the confirm bar is up"
+        assert state.open_asks, "a kit on screen is still assuming a budget and a party of one"
+
+    def test_the_fixture_path_puts_its_open_questions_in_the_audit_rail(self, monkeypatch):
+        """Every guardrail emits a trace event — that is the whole principle, and the
+        trace panel is what a judge reads. `_refresh_open_asks` emitted after the last
+        drain of the turn, so in fixture mode the row never arrived."""
+        from concierge.obs.trace import bind_sink
+
+        mod, state = self._state()
+        monkeypatch.setattr(mod, "_STEP_DELAY", 0)
+
+        sink = []
+        bind_sink(sink)
+        try:
+
+            async def drive():
+                async for _ in mod.State._fixture_turn(state, sink, "two nights in the páramo"):
+                    pass
+
+            asyncio.run(drive())
+        finally:
+            bind_sink(None)
+
+        assert "guardrail.open_questions" in [e.event for e in state.trace]
+
+
 class TestASizeAnswerDoesNotRebuildTheKit:
     """Observed live: the customer typed "My size is XL in both" and got a HIKING
     jacket where a cycling jacket had been, and $248.99 where $99.99 had been. They
