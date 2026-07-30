@@ -14,6 +14,11 @@ system already had.
 **Status.** The three P0s were fixed in `tell-the-user-what-broke`. Each is marked
 below. Everything in P1 and P2 is still open.
 
+A later live run exposed three more, all agent-side and all fixed in
+`answer-a-size-not-a-new-kit`: answering a size question rebuilt the whole kit with
+different products, substitution had no distance ceiling (XL was handed an S), and a
+30-second Gemini retry was completely silent. See `DECISIONS.md`, 29 Jul.
+
 ---
 
 ## P0 — visible on the projector, breaks the demo

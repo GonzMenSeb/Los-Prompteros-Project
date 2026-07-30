@@ -715,3 +715,57 @@ Traefik negotiates h2 and a healthy app answers `400 Invalid websocket upgrade`.
 offline suite needs no network and no secrets — verified by running it green in a clean
 clone with no `.env` — so a public-repo runner costs nothing and no VPS credential
 leaves our infrastructure. Deploy stays entirely on Jenkins.
+
+### 2026-07-29 · Answering a question must not change the answer to a different one
+
+A live run: the customer typed *"My size is XL in both"*. They got a **hiking** jacket
+where a cycling jacket had been, a jersey where the base layer had been, and $248.99
+where $99.99 had been. They asked for a size and were handed a different kit.
+
+`_continue` ran `_retrieve` and `_select` unguarded on every turn, and `_select` asks
+the model to pick from scratch. Nothing anchored the new selection to the old one, so
+supplying a size re-rolled the whole kit.
+
+`_resize` is a deterministic fast path: when this turn is unambiguously a size answer,
+re-resolve the **variants** of the products already chosen and change nothing else.
+Zero model calls — the first turn that reaches `stage="kit"` without one. Six
+conditions must all hold, and **every doubt returns `None`** and falls through to the
+old path, which is slow and sometimes re-picks but has never looked broken on stage.
+
+Two rules inside it are load-bearing and easy to get backwards. `unservable_slots` is
+**copied**, never recomputed — recomputing turns "we could not read that collection"
+into "not stocked", an inventory claim we have not earned. `budget_minor` **is**
+recomputed, because the follow-up was appended to `answers` first and may itself carry
+a budget.
+
+The trigger cannot be "contains a size token": the tokenizer would read "make it 3
+people" and "2 nights" as sizes and silently suppress a legitimate rebuild. It reuses
+the budget parser's `_NOT_A_UNIT` lookahead, requires the intent gate to have said
+`clarify`, requires the kit to actually have something unconfirmed, and rejects any
+change-intent word. `agent/` deliberately does **not** import `ui.demo_data.sizes_in`
+— that would put the fixture module on the live path — and the loop's tokenizer has to
+be narrower anyway.
+
+Same run, same customer: they asked for **XL** and were handed **S**. `_nearest_available`
+walked outward with no ceiling. The fix is in `_choose_size` and is measured in ladder
+steps, not list index, because the feed groups by colour and the reported XL → S was
+**one index away**. Details and the calibration numbers are in the facts registry.
+
+Over the ceiling the slot goes unservable, which on its own makes a card vanish from
+the kit mid-demo with no explanation. So the refusal carries its reason up through a
+contextvar collector — the same shape as `obs.trace.bind_sink`, reached by name
+through the tools adapter so `agent/` still does not depend on `commerce/` — and
+`_select` writes a sentence into `unservable_slots` instead of a bare slot name.
+
+Recorded because implementing it surfaced a defect the design did not predict: applying
+a token to **every** line means a token that is not on a product's ladder at all
+("XL" against trousers sized `W24 L30`) falls through to first-available, returns the
+line we already had, and would have flagged an untouched line as a substitution the
+customer never caused. A substitution is now only accepted when it actually moves the
+label. Caught by replaying the bug report, not by a test — which is the argument for
+replaying it.
+
+Also: `model.retry` was in neither status map, so three Gemini 503 backoffs cost ~30 s,
+~10 s and ~18 s of silence in that same run. It is a throttle, not a stage, and gets
+its own wording — the other two blame Decathlon, which had nothing to do with it.
+

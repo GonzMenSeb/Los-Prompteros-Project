@@ -191,6 +191,20 @@ Re-measured **25 Jul 2026**, and the numbers moved. `SPEC.md §3.2` and
   options and three parts: `"Smoked Black / M / 5'2\"–5'5\""`. Positional splitting is
   trusted **only when part count equals option count**; otherwise match the whole
   title. Slicing blindly matches a size request against a height range.
+- **A substitution is capped at `MAX_SIZE_STEPS = 2` LADDER steps, never list index.**
+  Observed live 29 Jul: an **XL request was handed an S**, disclosed only as "check the
+  fit". The feed groups variants by colour, so the colour boundary sits *inside* the
+  index space — with `Red/S,M,L,XL` then `Blue/S`, a sold-out XL is **one index** from
+  `Blue/S` and **three sizes** from it. An index ceiling would not have caught it.
+  `_GARMENT` is now derived from the ordered `_GARMENT_RANK`; `_RUNG = 0.5` because US
+  sizes step by a half, so **10.5 → 11.5 sits exactly on the ceiling.** Both numbers
+  are calibration knobs, not truths: an EU ladder or third-sizes needs them retuned.
+  A request on a *different* ladder (`"XL"` at a boot) is refused as a category error;
+  an *unmeasurable* label ("One Size", `"W24 L30"`) is allowed through, or every
+  one-size product would go unservable. Over the ceiling the slot goes unservable, and
+  `_too_far_reason` puts the reason in `unservable_slots` so the card does not simply
+  vanish. `bind_too_far` carries it up — reached by NAME through the tools adapter, so
+  `agent/` still does not import `commerce/`.
 
 ### Gemini  (`concierge/agent/`)
 
