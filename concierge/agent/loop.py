@@ -29,7 +29,9 @@ from pydantic import BaseModel, Field, ValidationError
 from concierge.agent import prompts, tools
 from concierge.agent.classify import MODEL, classify, generate
 from concierge.domain.guardrails import (
+    OpenQuestion,
     check_budget,
+    check_open_questions,
     check_size_confirmation,
     check_stock,
     check_substitution,
@@ -86,6 +88,7 @@ class TurnResult(BaseModel):
     unservable_slots: list[str] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
     questions: list[Question] = Field(default_factory=list)
+    open_questions: list[OpenQuestion] = Field(default_factory=list)
     offer_cart: bool = False
     error: str = ""
 
@@ -744,7 +747,20 @@ async def _select(session: ConversationSession) -> tuple[Kit, list[str]]:
 # ── presentation ────────────────────────────────────────────────────────────
 
 
-def _disclosures(kit: Kit, unchecked: list[str] | None = None) -> str:
+def _open_questions(session: ConversationSession, kit: Kit) -> list[OpenQuestion]:
+    """Everything the customer typed is the only evidence that a default was chosen
+    rather than defaulted — `party_size` defaults to 1 with no way to tell the two
+    apart from the model alone."""
+    said = " ".join([session.trip_message, *session.answers])
+    party = session.profile.party_size if session.profile else 1
+    return check_open_questions(kit, party, said)
+
+
+def _disclosures(
+    kit: Kit,
+    unchecked: list[str] | None = None,
+    open_questions: list[OpenQuestion] | None = None,
+) -> str:
     """Emitted from data, not from the model, so they cannot be forgotten."""
     lines = list(check_substitution(kit.items)) + check_size_confirmation(kit.items)
     # A slot we could not read reaches _select as unfilled and lands in
@@ -765,14 +781,10 @@ def _disclosures(kit: Kit, unchecked: list[str] | None = None) -> str:
     # An empty kit with a budget is the nothing-fits case, not a cheap one — the
     # naive gap arithmetic reports "$40.00 under" on a kit containing nothing.
     lines.append(check_budget(kit).message)
-    # The question stage runs once and never asks again, so a customer who answered
-    # some of it lost the rest in silence. Sizes already have a way back; a budget had
-    # none, and "No budget set." states the fact without offering the way out.
-    if kit.budget_minor is None and kit.items:
-        lines.append(
-            "You haven't given me a budget — say one and I'll tell you straight away if this "
-            "kit goes past it."
-        )
+    # The question stage runs once and never asks again, so whatever the customer did
+    # not answer was assumed silently and forever. Each of these disappears the moment
+    # the answer arrives, which is what stops a standing offer becoming nagging.
+    lines.extend(q.ask for q in (open_questions or []))
     return "\n".join(lines)
 
 
@@ -849,11 +861,14 @@ async def run_turn(user_message: str, session: ConversationSession) -> TurnResul
                 result.citations = session.citations
                 result.offer_cart = bool(session.kit.items)
                 result.stage = "kit"
+                # On the result, not just in the prose: this path leaves the confirm bar
+                # standing, and state reads the asks off the result for it.
+                result.open_questions = _open_questions(session, session.kit)
                 result.text = (
                     "That message tried to override my instructions, so I've ignored it — I can't hand "
                     "out free or discounted items, and nothing here has changed.\n\nThis is the same kit "
                     "as before, at the same prices. Tell me what you'd actually like to adjust.\n\n"
-                    + _disclosures(session.kit, session.unchecked_slots)
+                    + _disclosures(session.kit, session.unchecked_slots, result.open_questions)
                 )
             elif session.profile is not None:
                 result = await _continue(session, session.trip_message, result)
@@ -1111,10 +1126,11 @@ async def _continue(session: ConversationSession, user_message: str, result: Tur
     result.profile, result.slots = session.profile, session.slots
     result.citations = session.citations
     result.kit, result.unservable_slots = kit, unservable
+    result.open_questions = _open_questions(session, kit)
     result.text = (
         await _present(session, kit, _disclosure_figures(kit))
         + "\n\n"
-        + _disclosures(kit, session.unchecked_slots)
+        + _disclosures(kit, session.unchecked_slots, result.open_questions)
     ).strip()
     result.offer_cart = bool(kit.items)
     result.stage = "kit"

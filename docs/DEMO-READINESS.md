@@ -14,9 +14,11 @@ system already had.
 **Status.** The three P0s were fixed in `tell-the-user-what-broke`. Every item below
 carries its own status in its heading.
 
-P1 and P2 were then closed in `polish-for-a-first-timer`, except **#4**, which is only
-partly closed: sizes and budget each have a way back now, but party size and existing
-kit do not, and nothing re-runs the question stage. Measured effect of #5: the hero
+P1 and P2 were then closed in `polish-for-a-first-timer`. **#4** was finished in
+`ask-only-what-is-still-unknown`: `check_open_questions` derives what the kit is still
+assuming — budget, party size, existing kit — from what the customer actually typed,
+every turn, and each ask disappears the moment it is answered. Nothing re-runs the
+model's question stage; the asks are a guardrail, not a prompt. Measured effect of #5: the hero
 moved from 582px to **319px** on a 414px phone. **#9 turned out to be already closed** —
 `presupuesto`, `hasta`, `dólares` and `tallas?` were all in the parsers; it was written
 up as open without checking, and checking it is what showed otherwise.
@@ -156,7 +158,7 @@ guardrail instead of nothing.
 
 ## P1 — makes a first-timer stumble
 
-### 4. Four questions, one free-text field, never asked again — PARTLY FIXED
+### 4. Four questions, one free-text field, never asked again — FIXED
 
 `prompts.py`:
 

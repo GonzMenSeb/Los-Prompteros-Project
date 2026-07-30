@@ -811,3 +811,82 @@ Recorded because it corrects an earlier entry in this file: the "parsers are key
 English" finding was **already closed** when it was written up. `presupuesto`, `hasta`,
 `dólares` and `tallas?` were all present. It was written from reading the code once and
 not checked; checking it is what showed otherwise. Now pinned by tests so it stays true.
+
+### 2026-07-29 · Ask what is still unknown, every turn, and stop when it is answered
+
+The question stage runs once. `questions_asked` latches, and `QUESTION_PROMPT` says so
+in as many words: *"AT MOST 4 questions, all in this one turn. Never ask again later."*
+So a customer who answered two of four had the other two assumed, silently, forever.
+
+The obvious fix — let the model ask again — is the wrong shape twice over. It spends a
+model call to re-derive something already knowable, and a prompt instruction to ask
+"only if still missing" is a suggestion, which this project does not accept as a
+guardrail.
+
+`check_open_questions` is the deterministic version. It takes the kit, the party size,
+and **everything the customer typed**, and returns what is still being assumed. It runs
+on every turn that produces a kit, so an ask that is answered simply stops appearing —
+which is what keeps a standing offer from becoming a nag, without any state tracking
+which question was asked when.
+
+`party_size` is the one that needed the customer's own words rather than the model's
+output. `ActivityProfile.party_size` defaults to **1**, so an assumed 1 and a stated 1
+are byte-identical in the profile. The only evidence a default was chosen rather than
+defaulted is that they said so, hence the cue scan over `trip_message + answers`.
+
+Bias is deliberately toward silence: a loose match counts as ANSWERED. Under-asking is
+a smaller harm than pestering somebody who already replied. That is why the live
+bundle's *"I have no clothes for that"* closes the existing-kit question — it is an
+answer, and a stricter matcher would have gone on asking.
+
+Recorded because it is the same trap a teammate caught in `_STAGE_STATUS` earlier the
+same day, and I nearly walked into it again: **fixture mode never reaches `_continue`**,
+so wiring this only into the live path would have left it dead in exactly the mode that
+runs on stage without Gemini quota. `_refresh_open_asks` covers the fixture, deriving
+party size from the kit's own person ordinals.
+
+The asks also reach the confirm bar, not just the prose — same reasoning as the size
+ask before them: prose scrolls away and the button that spends money does not.
+
+### 2026-07-29 · A cue has to be about the thing, not merely contain a common word
+
+Review of the entry above. The bias toward silence is right and stays; the cues that
+implemented it were not cues. `_PARTY_CUE` matched a bare `both`, and *"My size is XL in
+both"* is a verbatim live message from earlier the same day — recorded higher up this
+file. A customer answering the size question therefore silenced the party question, for
+the rest of the conversation, with the words the size question asked for.
+
+`_OWNED_CUE` matched a bare `have`, `has`, `got`, `already`, `nothing`. So *"what do I
+have to buy?"* read as *"I already own things"* — the exact opposite of what was said.
+`"I have a trip to the páramo"`, `"I have never camped before"`, `"I already booked the
+flights"` and `"nothing fancy, just something warm"` all closed the existing-kit
+question too. `said` is every message the customer has ever sent, so the longer someone
+talks the likelier an accidental cue, and the asks quietly stop for good.
+
+An ownership verb now needs something ownable within three words (`_GEAR`, or
+`nothing`/`nada`), `already` needs a verb after it, and `both` became `both of us` /
+`us both`. `we|us|our` stay loose on purpose: `_refresh_open_asks` derives party size
+from `person_indexes`, which `models.py` documents as empty for a party of one **or a
+shared kit**, so a three-person all-shared kit derives 1 and the cue scan is the only
+thing standing between that and a wrong ask.
+
+Two wiring holes from the same review:
+
+**`result.kit is None` does not mean there is no kit.** It means this turn did not build
+one. A redirect, a rate limit, and the model-call budget stop all leave the previous kit
+on screen, and `awaiting_confirmation` deliberately keeps the confirm bar up — the same
+`_BudgetExceeded` path that now says *"the kit above is still good"*. The asks were
+cleared at the start of the turn and never restored, so the button that spends money
+stopped disclosing what it assumed. It falls back to `_refresh_open_asks`.
+
+**The fixture emitted its guardrail event after the last drain of the turn**, so
+`guardrail.open_questions` never reached the trace panel in the mode that runs on stage.
+`_fixture_resize` drains after its own emits; `_fixture_turn` did not.
+
+A third, found by re-checking a claim rather than a line of code: the **injection reply
+computed the asks and threw them away.** It sets `result.kit = session.kit` and
+`offer_cart`, so it is a kit turn with the confirm bar standing — but it passed
+`_open_questions(...)` straight into `_disclosures` without ever assigning
+`result.open_questions`, which `_live_turn` is what reads. The prose listed all three
+assumptions and the button that spends money listed none. Assigned once and reused, so
+the two cannot drift apart again.

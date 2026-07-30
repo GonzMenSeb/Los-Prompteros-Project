@@ -575,3 +575,86 @@ def check_query_shape(q: str) -> str:
     if shaped != _normalise(q).strip():
         emit("guardrail.query_shape", {"original": q, "shaped": shaped, "empty": not shaped}, "guardrail")
     return shaped
+
+
+# The question stage runs once and latches (`questions_asked`), and its own prompt says
+# "Never ask again later" — so anything the customer did not answer was assumed, once,
+# forever, and silently. These are the assumptions worth surfacing, derived from data
+# rather than re-asked by the model: they disappear the moment the answer arrives, which
+# is what keeps a standing offer from turning into nagging.
+#
+# Bias is deliberately toward staying quiet. A cue that the customer TOLD us something
+# counts as answered even if loosely matched: under-asking is a smaller harm than
+# pestering someone who already replied. A common word is not a loose answer though —
+# a cue has to be ABOUT the party or ABOUT owning gear, or the ask is silenced by
+# language nobody meant as an answer, forever, which is the defect this replaced.
+_PARTY_CUE = re.compile(
+    # "both" alone was a live regression: "My size is XL in both" is two garments.
+    r"\b(we|us|our|ourselves|both of us|us both|couple|group|family|friends?|team|"
+    r"my (wife|husband|girlfriend|boyfriend|partner|son|daughter|kids?|child|mum|mom|dad|brother|sister)|"
+    r"\d+\s*(people|persons|adults|of us)|"
+    r"nosotros|mi (esposa|esposo|novia|novio|pareja|hijo|hija)|amigos?|familia|pareja)\b",
+    re.I,
+)
+# Gear, so an ownership verb has something to own. A bare "have" is not a cue —
+# "what do I have to buy?" is the opposite of an answer.
+_GEAR = (
+    r"(gear|kit|equipment|clothes|clothing|boots|shoes|jackets?|trousers|pants|"
+    r"pack|backpack|tent|sleeping bags?|bag|helmet|gloves|"
+    r"ropa|equipo|botas|zapatos|chaquetas?|carpa|casco|guantes)"
+)
+_OWNS = r"(own|owns|have|has|had|got|bring|bringing|tengo|tenemos|traigo)"
+_OWNED_CUE = re.compile(
+    rf"\balready\s+{_OWNS}\b"
+    rf"|\b{_OWNS}\s+(\w+\s+){{0,3}}({_GEAR}|nothing|none|nada|ninguno)\b"
+    rf"|\bno\s+{_GEAR}\b",
+    re.I,
+)
+
+
+class OpenQuestion(BaseModel):
+    key: str
+    ask: str
+
+
+def check_open_questions(kit: Kit, party_size: int, said: str) -> list[OpenQuestion]:
+    """What the kit is still assuming about this customer.
+
+    `said` is everything they typed — the trip description plus every answer — because
+    the only evidence that a default was CHOSEN rather than defaulted is that they said
+    so. `ActivityProfile.party_size` defaults to 1, which makes an assumed 1 and a
+    stated 1 identical in the model.
+    """
+    open_: list[OpenQuestion] = []
+
+    if kit.items and kit.budget_minor is None:
+        open_.append(
+            OpenQuestion(
+                key="budget",
+                ask="You haven't given me a budget — say one and I'll tell you straight away "
+                "if this kit goes past it.",
+            )
+        )
+    if party_size <= 1 and not _PARTY_CUE.search(said):
+        open_.append(
+            OpenQuestion(
+                key="party_size",
+                ask="I've built this for one person. Tell me if anyone else is going and I'll "
+                "size a set for each of them.",
+            )
+        )
+    if kit.items and not _OWNED_CUE.search(said):
+        open_.append(
+            OpenQuestion(
+                key="existing_kit",
+                ask="If you already own any of this, tell me which and I'll drop those lines "
+                "rather than sell them to you twice.",
+            )
+        )
+
+    emit(
+        "guardrail.open_questions",
+        {"open": [q.key for q in open_], "party_size": party_size},
+        "guardrail",
+    )
+    return open_

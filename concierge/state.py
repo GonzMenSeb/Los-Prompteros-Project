@@ -305,6 +305,9 @@ class State(rx.State):
 
     confirming_clear: bool = False
 
+    # What the kit is still assuming about this customer, from check_open_questions.
+    open_asks: list[str] = []
+
     # Every handler that spends a Gemini call or touches Decathlon re-checks this, as
     # `GATE_ON and not self.unlocked`. Conditional rendering is not a guard — the events
     # are callable over the wire whatever is on screen — exactly the reasoning behind
@@ -467,6 +470,23 @@ class State(rx.State):
         sink.clear()
         return True
 
+    def _refresh_open_asks(self) -> None:
+        """Fixture mode never reaches `_continue`, so the live path's call to
+        `check_open_questions` would leave these empty in exactly the mode that runs on
+        stage. Party size comes off the kit's own person ordinals — the fixture is two
+        people and says so through them."""
+        from concierge.domain.guardrails import check_open_questions
+        from concierge.domain.models import Kit
+
+        said = " ".join(m.content for m in self.messages if m.role == "user")
+        party = max((i for it in self.kit_items for i in it.person_indexes), default=1)
+        kit = Kit(
+            items=list(self.kit_items),
+            unservable_slots=list(self.unservable_slots),
+            budget_minor=self.budget_minor,
+        )
+        self.open_asks = [q.ask for q in check_open_questions(kit, party, said)]
+
     def _apply_kit(self, kit) -> None:
         self.kit_items = list(kit.items)
         self.unservable_slots = list(kit.unservable_slots)
@@ -608,6 +628,10 @@ class State(rx.State):
         yield
 
     @rx.var
+    def has_open_asks(self) -> bool:
+        return bool(self.open_asks)
+
+    @rx.var
     def is_presenter(self) -> bool:
         """No VIP token configured means nobody is being gated — local dev and
         `make walkthrough` must keep their controls."""
@@ -627,6 +651,7 @@ class State(rx.State):
 
     def clear(self):
         self.confirming_clear = False
+        self.open_asks = []
         _reset_session(self.router.session.client_token)
         self.messages = []
         self.kit_items = []
@@ -661,6 +686,7 @@ class State(rx.State):
         # No timed reset: Reflex holds the session state lock for a handler's duration,
         # so sleeping to clear a badge would serialize that session's other events.
         self._reset_copy()
+        self.open_asks = []
         # Sending a message is an implicit Keep. Left standing, the header sits in
         # Erase/Keep over a run the customer has since added to.
         self.confirming_clear = False
@@ -741,6 +767,11 @@ class State(rx.State):
             yield
 
         self._apply_kit(demo_data.demo_kit())
+        self._refresh_open_asks()
+        # Its guardrail event is emitted after the loop above drained for the last time,
+        # so without this the audit rail never gets the row. `_fixture_resize` drains
+        # after its own emits for the same reason.
+        self._drain(sink)
         self.messages.append(
             ChatMessage(
                 role="assistant",
@@ -777,6 +808,7 @@ class State(rx.State):
             yield
 
         self._apply_kit(kit)
+        self._refresh_open_asks()
         still = check_size_confirmation(self.kit_items)
         emit(
             "guardrail.size_confirmed",
@@ -848,6 +880,17 @@ class State(rx.State):
             self._apply_kit(result.kit)
 
         self.unservable_slots = list(result.unservable_slots or self.unservable_slots)
+        # Prose scrolls away; the confirm bar does not. Same reasoning as the size ask.
+        if result.kit is not None:
+            self.open_asks = [q.ask for q in result.open_questions]
+        elif self.kit_items:
+            # No kit from THIS turn is not no kit: a redirect, a rate limit or the model
+            # call budget running out all leave the previous one on screen with the
+            # confirm bar up, and `awaiting_confirmation` below deliberately keeps it
+            # there. Dropping the asks would take them off the button that spends money
+            # for the rest of the session.
+            self._refresh_open_asks()
+            self._drain(sink)
         self.messages.append(
             ChatMessage(
                 role="assistant",
