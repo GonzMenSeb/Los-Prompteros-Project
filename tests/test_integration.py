@@ -1276,10 +1276,34 @@ class TestTheFirstTimerPolish:
         state.clear()
         assert state.messages == [] and state.confirming_clear is False
 
-    def test_the_presenter_panel_is_not_shown_to_the_audience(self):
+    def test_sending_a_message_takes_back_the_erase_offer(self):
+        """Otherwise the header sits in Erase/Keep over a run the customer has since
+        added to, and the next click destroys the turn they just paid for."""
+        mod, state = self._state()
+        state.confirming_clear = True
+
+        async def to_first_yield():
+            gen = mod.State.send_message.fn(state, {"message": "two nights in the páramo"})
+            await gen.__anext__()
+            await gen.aclose()
+
+        asyncio.run(to_first_yield())
+        assert state.confirming_clear is False, "sending a message is an implicit Keep"
+
+    def test_the_presenter_panel_is_not_shown_to_the_audience(self, monkeypatch):
         mod, state = self._state()
         # No token configured is local dev — `make walkthrough` keeps its button.
         assert state.is_presenter is True
+
+        # The case the gate exists for, and the only one production runs in. A fresh
+        # instance because `rx.var` caches against `is_vip`, and VIP_TOKEN is a module
+        # global that is not part of that dependency — which is fine in the app, where
+        # it is read once at import, and a trap in a test that patches it.
+        monkeypatch.setattr(mod, "VIP_TOKEN", "a-configured-token")
+        audience = mod.State(_reflex_internal_init=True)
+        assert audience.is_presenter is False, "the audience must not get the presenter panel"
+        audience.is_vip = True
+        assert audience.is_presenter is True, "the presenting laptop keeps its controls"
 
     def test_the_hero_says_how_long_the_first_answer_takes(self):
         """~52 s measured, 80 s in one live bundle, and nothing said so."""

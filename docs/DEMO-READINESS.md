@@ -11,8 +11,8 @@ system already had.
 
 `DECISIONS.md` records calls that were made; this records ones that had not been.
 
-**Status.** The three P0s were fixed in `tell-the-user-what-broke`. Each is marked
-below. Everything in P1 and P2 is still open.
+**Status.** The three P0s were fixed in `tell-the-user-what-broke`. Every item below
+carries its own status in its heading.
 
 P1 and P2 were then closed in `polish-for-a-first-timer`, except **#4**, which is only
 partly closed: sizes and budget each have a way back now, but party size and existing
@@ -216,8 +216,13 @@ only offer is to start a fresh conversation — losing the kit they were looking
 
 ### 9. The parsers are keyed to English words — ALREADY CLOSED
 
-A Spanish-speaking judge in Medellín typing `presupuesto 900` gets no budget, and the
-size tokenizer only recognises Latin letter sizes and numbers.
+**The paragraph below was wrong when it was written, and is kept only so the correction
+has something to point at.** `_budget_minor` already had `presupuesto`, `hasta` and
+`dólares`, and `_SIZE_CUE` already had `tallas?`. It was written from reading the code
+once without running it. Tests now pin all four.
+
+~~A Spanish-speaking judge in Medellín typing `presupuesto 900` gets no budget, and the
+size tokenizer only recognises Latin letter sizes and numbers.~~
 
 The English UI itself is **correct and not a finding**: the agent-commerce layer
 exists only on Decathlon's US store, in USD, so an English product is the honest one.
