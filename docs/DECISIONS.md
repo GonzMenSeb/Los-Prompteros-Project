@@ -769,3 +769,45 @@ Also: `model.retry` was in neither status map, so three Gemini 503 backoffs cost
 ~10 s and ~18 s of silence in that same run. It is a throttle, not a stage, and gets
 its own wording — the other two blame Decathlon, which had nothing to do with it.
 
+
+### 2026-07-29 · The guided-demo controls belong to the presenter, not the audience
+
+`walkthrough_bar` rendered for everyone. Measured at 414px, the panel ran from 224px to
+about 560px and the product did not explain itself until 582px — so a third of a phone
+screen was a control panel for a scripted demo the viewer is not running, captioned
+"Step 1 of 2 · refusal · grounded research · live kit". With it gated, the hero starts
+at **319px**.
+
+Gated on `is_presenter`, which is `is_vip or not VIP_TOKEN`: the presenting laptop
+already identifies itself with `?vip=<token>`, and with no token configured nobody is
+being gated at all, so local dev and `make walkthrough` keep their button. The RUNNING
+banner still shows to everyone — an audience watching a scripted demo is entitled to
+see that it is scripted.
+
+Three smaller ones from the same review, all of them the same shape: **the system knew
+something and did not say it.**
+
+"Start over" wiped messages, kit, trace and cart on one click, from a control that is
+icon-only below `md` — a mis-tap ending three minutes of live API calls mid-pitch. It
+now asks, but **only when there is something to lose**: `has_anything_to_lose` keeps a
+fresh page clearing in one click, so the confirmation never becomes furniture people
+learn to click through.
+
+Nothing said how long the first answer takes. It is ~52 s of measured model latency and
+ran 80 s in one live bundle, so the only evidence a first-timer had that waiting was
+correct behaviour was a spinner.
+
+`_BudgetExceeded` told the customer to "start a fresh conversation" — but `result.kit`
+stays None on that path, so state keeps the kit already on screen and the cart button
+still works. The text was sending people to destroy a working kit for nothing.
+
+And the question stage runs once and never asks again, so a customer who answered some
+of it lost the rest in silence. Sizes already had a way back. A budget did not: the kit
+said "No budget set." — a fact, with no offer of the way out. `_disclosures` now adds
+one. Party size and existing kit still have no route back, and nothing re-runs the
+question stage; recorded as partly closed rather than closed.
+
+Recorded because it corrects an earlier entry in this file: the "parsers are keyed to
+English" finding was **already closed** when it was written up. `presupuesto`, `hasta`,
+`dólares` and `tallas?` were all present. It was written from reading the code once and
+not checked; checking it is what showed otherwise. Now pinned by tests so it stays true.

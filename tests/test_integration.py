@@ -1251,6 +1251,84 @@ class TestAQuotaFailureIsNotAStackTrace:
         assert 'self.error = f"Cart creation failed — {type(exc).__name__}' not in src
 
 
+class TestTheFirstTimerPolish:
+    """Four things a person who has never seen this product walks into."""
+
+    def _state(self):
+        mod = _mod("concierge.state")
+        return mod, mod.State(_reflex_internal_init=True)
+
+    def test_start_over_asks_first_when_there_is_something_to_lose(self):
+        """It destroys a kit that cost three minutes of live API calls, from a control
+        that is icon-only below md."""
+        mod, state = self._state()
+        assert state.has_anything_to_lose is False, "a fresh page should clear in one click"
+
+        state.messages = [mod.ChatMessage(role="user", content="two nights in the páramo")]
+        assert state.has_anything_to_lose is True
+
+        state.ask_to_clear()
+        assert state.confirming_clear is True
+        state.cancel_clear()
+        assert state.confirming_clear is False and state.messages, "cancel must keep the run"
+
+        state.ask_to_clear()
+        state.clear()
+        assert state.messages == [] and state.confirming_clear is False
+
+    def test_the_presenter_panel_is_not_shown_to_the_audience(self):
+        mod, state = self._state()
+        # No token configured is local dev — `make walkthrough` keeps its button.
+        assert state.is_presenter is True
+
+    def test_the_hero_says_how_long_the_first_answer_takes(self):
+        """~52 s measured, 80 s in one live bundle, and nothing said so."""
+        import inspect
+
+        chat = _mod("concierge.ui.chat")
+        assert "about a minute" in inspect.getsource(chat.empty_state)
+
+    def test_running_out_of_model_calls_does_not_claim_the_kit_is_gone(self):
+        import inspect
+
+        loop = _mod("concierge.agent.loop")
+        src = inspect.getsource(loop.run_turn)
+        assert "still good" in src, "the kit survives a budget stop; the text must say so"
+
+    def test_a_kit_with_no_budget_offers_the_way_to_set_one(self):
+        """The question stage runs once and never asks again, so an unanswered budget
+        used to be reported as a fact with no way out."""
+        from concierge.domain.models import Kit
+
+        loop = _mod("concierge.agent.loop")
+        from tests.conftest import item as make_item
+
+        text = loop._disclosures(Kit(items=[make_item()], unservable_slots=[], budget_minor=None))
+        assert "haven't given me a budget" in text
+
+        priced = loop._disclosures(Kit(items=[make_item()], unservable_slots=[], budget_minor=90_000))
+        assert "haven't given me a budget" not in priced
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [("mi presupuesto es 900 dolares", 90_000), ("hasta 900 dolares", 90_000)],
+    )
+    def test_the_budget_parser_understands_spanish(self, text, expected):
+        """The UI is English because the store is, but a judge in Medellín types
+        Spanish. Verified rather than assumed."""
+        loop = _mod("concierge.agent.loop")
+
+        class S:
+            answers = [text]
+            trip_message = ""
+
+        assert loop._budget_minor(S()) == expected
+
+    def test_the_size_gate_understands_spanish(self):
+        loop = _mod("concierge.agent.loop")
+        assert loop._SIZE_CUE.search("mi talla es XL")
+
+
 class TestASizeAnswerDoesNotRebuildTheKit:
     """Observed live: the customer typed "My size is XL in both" and got a HIKING
     jacket where a cycling jacket had been, and $248.99 where $99.99 had been. They

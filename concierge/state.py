@@ -303,6 +303,8 @@ class State(rx.State):
 
     is_vip: bool = False
 
+    confirming_clear: bool = False
+
     # Every handler that spends a Gemini call or touches Decathlon re-checks this, as
     # `GATE_ON and not self.unlocked`. Conditional rendering is not a guard — the events
     # are callable over the wire whatever is on screen — exactly the reasoning behind
@@ -605,7 +607,26 @@ class State(rx.State):
         self.gate_busy = False
         yield
 
+    @rx.var
+    def is_presenter(self) -> bool:
+        """No VIP token configured means nobody is being gated — local dev and
+        `make walkthrough` must keep their controls."""
+        return self.is_vip or not VIP_TOKEN
+
+    @rx.var
+    def has_anything_to_lose(self) -> bool:
+        """Whether "Start over" would actually destroy something. A kit costs three
+        minutes of live API calls to rebuild, and the control is icon-only below md."""
+        return bool(self.messages or self.kit_items or self.trace)
+
+    def ask_to_clear(self):
+        self.confirming_clear = True
+
+    def cancel_clear(self):
+        self.confirming_clear = False
+
     def clear(self):
+        self.confirming_clear = False
         _reset_session(self.router.session.client_token)
         self.messages = []
         self.kit_items = []
