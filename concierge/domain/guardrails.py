@@ -503,6 +503,29 @@ def find_unbacked_claims(
     return claims
 
 
+# Excising the claim leaves the preposition that introduced it. Observed live, on a
+# projector: "a wide temperature jump from to, high UV index levels". The claim going
+# and the reasoning staying is the design; the connector that pointed AT the claim is
+# neither, and has to go with it.
+_DANGLING = (
+    # "from to" / "between and" / "of up to" — a connector run with nothing between.
+    (re.compile(r"\b(?:from|between|of|at|around|near|up\s+to|down\s+to|over|under)"
+                r"(?:\s+(?:to|and|from))+(?=[\s,;.:]|$)", re.I), ""),
+    # A connector left pointing at punctuation or the end of the sentence.
+    (re.compile(r"\s\b(?:from|to|between|of|at|around|near|over|under|reaching|rated)"
+                r"(?=\s*[,;.:]|\s*$)", re.I), ""),
+)
+
+
+def _mend(text: str) -> str:
+    out = text
+    for pattern, repl in _DANGLING:
+        out = pattern.sub(repl, out)
+    out = re.sub(r"\s+([.,;:])", r"\1", out)
+    out = re.sub(r"([,;:])\s*(?=[,;:.])", "", out)
+    return re.sub(r"\s{2,}", " ", out)
+
+
 def scrub_prose(text: str, items: Sequence[Any], *, allowed_minor: Iterable[int] = ()) -> str:
     """Excise unbacked spec claims from model prose. Detection is the deliverable —
     the claim phrase goes, the surrounding reasoning stays."""
@@ -517,6 +540,7 @@ def scrub_prose(text: str, items: Sequence[Any], *, allowed_minor: Iterable[int]
     for c in sorted(claims, key=lambda c: c.start, reverse=True):
         out = out[: c.start] + out[c.end :]
     out = re.sub(r"\s+([.,;:])", r"\1", _WS.sub(" ", out))
+    out = _mend(out)
     out = re.sub(r"^[\s,;:.]+", "", out).strip()
 
     emit(
@@ -682,3 +706,18 @@ def check_open_questions(kit: Kit, party_size: int, said: str) -> list[OpenQuest
         "guardrail",
     )
     return open_
+
+
+def check_sole_sizes(items: Sequence[KitItem]) -> list[str]:
+    """A line the customer was never asked about because there was nothing to ask —
+    one size left in stock. No question was owed, but the fact is still theirs: a live
+    run put a 3XL pair of running shorts in a kit and said nothing at all."""
+    lines = [
+        f"{i.product_title}: {i.size_label} is the only size left in stock, so that is "
+        "what I put in — not a size I picked for you."
+        for i in items
+        if i.sole_size
+    ]
+    if lines:
+        emit("guardrail.sole_size", {"count": len(lines)}, "guardrail")
+    return lines

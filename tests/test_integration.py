@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from pathlib import Path
 
 import pytest
 
@@ -1522,6 +1523,121 @@ class TestTheFirstTimerPolish:
     def test_the_size_gate_understands_spanish(self):
         loop = _mod("concierge.agent.loop")
         assert loop._SIZE_CUE.search("mi talla es XL")
+
+
+class TestTheKitCanShrinkAndTheCartExplainsItself:
+    """From a live run: the agent invented a race in Edmonton, the customer said "I
+    aint searching a race in Canada", and the kit came back still sized to Edmonton's
+    summer. Nothing could ever be removed from a kit either — it only grew."""
+
+    def _kit(self):
+        from concierge.domain.models import Kit
+        from tests.conftest import item as make_item
+
+        return Kit(
+            items=[
+                make_item(slot="Running Hat", product_title="Kiprun Ultra-Light 5-Panel Running Cap"),
+                make_item(slot="Road Running Shoes", product_title="Kiprun Kipride Men's Running Shoes"),
+                make_item(slot="Running Socks", product_title="Kiprun Run 500 Thin Breathable Mid Socks"),
+            ],
+            unservable_slots=[],
+            budget_minor=100_000,
+        )
+
+    @pytest.mark.parametrize(
+        "message,expected",
+        [
+            ("I already have shoes", 1),
+            ("remove the cap", 1),
+            ("drop the running socks and the cap", 2),
+        ],
+    )
+    def test_it_takes_out_the_lines_the_customer_names(self, message, expected):
+        loop = _mod("concierge.agent.loop")
+        assert len(loop._lines_named(self._kit(), message)) == expected
+
+    @pytest.mark.parametrize("message", ["I already have all of it", "my size is XL", "looks good"])
+    def test_it_names_nothing_when_the_message_names_nothing(self, message):
+        loop = _mod("concierge.agent.loop")
+        assert loop._lines_named(self._kit(), message) == []
+
+    def test_a_word_shared_by_the_whole_kit_identifies_nothing(self):
+        """"drop the running belt" must not empty a kit where every line says
+        "running"."""
+        loop = _mod("concierge.agent.loop")
+        assert loop._lines_named(self._kit(), "remove the running gear") == []
+
+    async def test_emptying_the_kit_falls_through_instead(self):
+        """An empty cart is never what "I already have shoes" meant."""
+        loop = _mod("concierge.agent.loop")
+        from concierge.domain.models import Kit
+        from tests.conftest import item as make_item
+
+        one = Kit(items=[make_item(product_title="Kiprun Cap")], unservable_slots=[], budget_minor=None)
+        session = loop.ConversationSession(questions_asked=True, kit=one)
+
+        assert await loop._drop(session, "remove the cap", loop.TurnResult(intent="clarify")) is None
+
+    def test_a_correction_to_the_trip_throws_the_profile_away(self):
+        """The customer said "not in Canada" and got a kit still built on Canadian
+        weather, because research and profile only ever ran on turn one."""
+        from concierge.domain.models import GearSlot
+
+        loop = _mod("concierge.agent.loop")
+
+        session = loop.ConversationSession(
+            trip_message="I wanna start to make running with a 10 kilometers race",
+            profile=_profile(),
+            slots=[GearSlot(name="shoes", rationale="road", collection_handles=["x"])],
+            research_text="Edmonton, Alberta…",
+            questions_asked=True,
+        )
+        loop._rebuild_premise(session, "I aint searching a race in Canada")
+
+        assert session.profile is None and session.slots == []
+        assert session.research_text == ""
+        # The correction is APPENDED — "not in Canada" alone is not a trip.
+        assert "10 kilometers race" in session.trip_message
+        assert "corrected" in session.trip_message
+        assert session.rebuilds == 1
+
+    def test_the_cart_says_what_moved_since_the_last_link(self):
+        mod, state = self._state()
+        from tests.conftest import item as make_item
+
+        state.kit_items = [make_item(product_title="Cap", size_label="One Size")]
+        assert state._cart_changes() == [], "the first cart has nothing to compare to"
+        state._remember_cart_lines()
+
+        state.kit_items = [make_item(product_title="Shoes", size_label="9")]
+        changes = state._cart_changes()
+        assert any("added: Shoes" in c for c in changes)
+        assert any("removed: Cap" in c for c in changes)
+
+    def test_the_fixture_can_drop_a_line_too(self):
+        """Fixture mode is what runs on stage without quota. Wiring discard only into
+        the live path would leave it dead exactly there — the same trap as the stage
+        captions and the open questions before it."""
+        mod, state = self._state()
+        from concierge.ui import demo_data
+
+        kit = demo_data.demo_kit()
+        state.kit_items = list(kit.items)
+
+        named = state._fixture_drop_lines("I already have the tent")
+        assert len(named) == 1
+        assert "Tent" in state.kit_items[named[0]].product_title
+
+        assert state._fixture_drop_lines("my size is XL") == []
+        assert state._fixture_drop_lines("I already have all of it") == []
+
+    def test_the_handover_tells_them_to_check_it(self):
+        src = Path("concierge/state.py").read_text(encoding="utf-8")
+        assert "check it before you pay" in src
+
+    def _state(self):
+        mod = _mod("concierge.state")
+        return mod, mod.State(_reflex_internal_init=True)
 
 
 class TestTheAsksReachEveryPathThatLeavesAKitOnScreen:

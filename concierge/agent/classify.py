@@ -128,6 +128,12 @@ Rules:
   * A trip in a place you have not heard of is still activity_kit.
   * `discipline` is the sport in 1-3 words, or null.
   * `reason` is one short sentence; it is shown to a human in a trace panel.
+  * `corrects_premise` is true ONLY when the message contradicts something the trip
+    itself was understood to be — the place, the season or date, the distance or
+    duration, the activity, or who is going. "That's not in Canada", "it's in
+    October not July", "it's a half not a 10k", "there are three of us" are all
+    true. Giving a size, a budget, or asking for something cheaper are all FALSE:
+    those adjust the kit, not the trip.
 
 Conversation so far:
 {context}
